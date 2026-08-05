@@ -3,9 +3,9 @@ dist
 node_modules
 .vscode-test/
 *.vsix
-testarea/coverage
-testarea/reports/*.json
-testarea/reports/npm.finish
-testarea/**/package-lock.json
-testarea/.vscode/settings.json
-testarea/**/test.playwright.config.js
+fixtures/**/node_modules
+fixtures/**/test-results
+fixtures/**/playwright-report
+fixtures/**/blob-report
+fixtures/**/.playwright-cli-test-runner
+fixtures/**/official-run-marker.txt

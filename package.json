@@ -1,242 +1,310 @@
 {
-  "name": "vscode-playwright-test-runner",
-  "displayName": "Playwright Test Runner",
-  "description": "Simple way to run or debug a single (or multiple) tests from context-menu",
-  "version": "1.4.1",
-  "publisher": "sakamoto66",
+  "name": "playwright-cli-test-runner",
+  "displayName": "Playwright CLI Test Runner",
+  "description": "Playwright UI and Inspector CodeLens actions, plus Run and Debug delegated to the official Playwright extension",
+  "version": "2.0.0",
+  "publisher": "rungruch",
   "author": {
-    "name": "sakamoto66",
-    "email": "sakamoto0322+github@gmail.com"
+    "name": "rungruch"
   },
+  "contributors": [
+    {
+      "name": "sakamoto66"
+    }
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/sakamoto66/vscode-playwright-test-runner.git"
+    "url": "https://github.com/rungruch/vscode-playwright-test-runner.git"
   },
   "license": "MIT",
   "icon": "public/icon.png",
   "engines": {
-    "vscode": "^1.56.0"
+    "vscode": "^1.93.0",
+    "node": ">=20.0.0"
   },
   "categories": [
     "Testing"
   ],
+  "keywords": [
+    "playwright",
+    "test",
+    "testing",
+    "e2e"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "extensionDependencies": [
+    "ms-playwright.playwright"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Running Playwright tests requires executing arbitrary code from the workspace."
+    },
+    "virtualWorkspaces": false
+  },
   "activationEvents": [
-    "*"
+    "onStartupFinished",
+    "workspaceContains:**/playwright.config.js",
+    "workspaceContains:**/playwright.config.cjs",
+    "workspaceContains:**/playwright.config.mjs",
+    "workspaceContains:**/playwright.config.ts",
+    "workspaceContains:**/playwright.config.cts",
+    "workspaceContains:**/playwright.config.mts",
+    "workspaceContains:**/*.spec.js",
+    "workspaceContains:**/*.spec.ts",
+    "workspaceContains:**/*.spec.tsx",
+    "workspaceContains:**/*.spec.jsx",
+    "workspaceContains:**/*.test.js",
+    "workspaceContains:**/*.test.ts",
+    "workspaceContains:**/*.test.tsx",
+    "workspaceContains:**/*.test.jsx",
+    "workspaceContains:**/*.spec.mjs",
+    "workspaceContains:**/*.spec.cjs",
+    "workspaceContains:**/*.spec.mts",
+    "workspaceContains:**/*.spec.cts",
+    "workspaceContains:**/*.test.mjs",
+    "workspaceContains:**/*.test.cjs",
+    "workspaceContains:**/*.test.mts",
+    "workspaceContains:**/*.test.cts"
   ],
   "main": "./dist/extension.js",
   "contributes": {
     "configuration": [
       {
-        "title": "Playwright-Test-Runner Config",
+        "title": "Playwright CLI Test Runner",
         "properties": {
-          "playwrightrunner.playwrightConfigPath": {
-            "type": "string",
-            "default": "",
-            "description": "Playwright config path (relative to ${workFolder} e.g. playwright.config.js)",
-            "scope": "window"
-          },
-          "playwrightrunner.projectPath": {
-            "type": "string",
-            "default": "${packageRoot}",
-            "description": "Absolute path to project directory (e.g. /home/me/project/sub-folder)",
-            "scope": "window"
-          },
-          "playwrightrunner.playwrightRunProject": {
-            "type": "string",
-            "default": "",
-            "description": "Specify the project to run Test (e.g. `chromium`)",
-            "scope": "window"
-          },
-          "playwrightrunner.playwrightDebugProject": {
-            "type": "string",
-            "default": "",
-            "description": "Specify the project to run debug (e.g. `chromium`)",
-            "scope": "window"
-          },
-          "playwrightrunner.playwrightInspectProject": {
-            "type": "string",
-            "default": "",
-            "description": "Specify the project to run inspector (e.g. `chromium`)",
-            "scope": "window"
-          },
-          "playwrightrunner.playwrightRunOptions": {
+          "playwrightCliRunner.configFiles": {
             "type": "array",
-            "default": [],
             "items": {
               "type": "string"
             },
-            "description": "Add CLI Options to the Playwright Command (e.g. https://playwright.dev/docs/test-intro)",
-            "scope": "window"
-          },
-          "playwrightrunner.playwrightEnvironmentVariables": {
-            "type": "array",
             "default": [],
-            "items": {
-              "type": "string",
-              "pattern": ".+=.*"
-            },
-            "description": "Add Environment Variables to the Playwright Command. (e.g. NODE_ENV=product)",
-            "scope": "window"
+            "markdownDescription": "Playwright config files to use, relative to a workspace folder or absolute. Supports `${workspaceFolder}`, `${packageRoot}` and `${configDir}` variables. When empty, configs are discovered automatically in every workspace folder.",
+            "scope": "resource"
           },
-          "playwrightrunner.playwrightCommand": {
+          "playwrightCliRunner.cli.executable": {
             "type": "string",
             "default": "",
-            "description": "Define an alternative playwright command (default:npx playwright)",
-            "scope": "window"
+            "markdownDescription": "Explicit Playwright CLI executable (e.g. `npx`, `pnpm`, `yarn`, or a path to a locally installed CLI). When empty, the local package manager or local Playwright installation is detected automatically.",
+            "scope": "resource"
           },
-          "playwrightrunner.disableCodeLens": {
-            "type": "boolean",
-            "default": false,
-            "description": "Disable CodeLens feature",
-            "scope": "window"
+          "playwrightCliRunner.cli.arguments": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Arguments inserted before the Playwright sub-command when using a custom `playwrightCliRunner.cli.executable` (e.g. `[\"playwright\"]` for `npx`). Never interpolated into a shell string.",
+            "scope": "resource"
           },
-          "playwrightrunner.codeLensSelector": {
+          "playwrightCliRunner.workingDirectory": {
             "type": "string",
-            "default": "**/*.{test,spec}.{js,jsx,ts,tsx}",
-            "description": "CodeLens will be shown on files matching this pattern"
+            "default": "",
+            "markdownDescription": "Working directory used to run the Playwright CLI. Supports `${workspaceFolder}`, `${packageRoot}` and `${configDir}`. Defaults to the directory containing the Playwright config file.",
+            "scope": "resource"
           },
-          "playwrightrunner.changeDirectoryToWorkspaceRoot": {
+          "playwrightCliRunner.runOptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Extra CLI options appended to companion Inspector and Playwright UI runs. Native Run/Debug options are owned by the Microsoft Playwright extension (see https://playwright.dev/docs/test-cli).",
+            "scope": "resource"
+          },
+          "playwrightCliRunner.environment": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "default": {},
+            "markdownDescription": "Environment variables added to companion CLI discovery, Inspector, UI, report, trace, and codegen processes. Values support variable substitution.",
+            "scope": "resource"
+          },
+          "playwrightCliRunner.codeLens.enabled": {
             "type": "boolean",
             "default": true,
-            "description": "Changes directory to workspace root before executing the test",
-            "scope": "window"
+            "markdownDescription": "Show Run, Debug, Inspect, and Playwright UI actions above test files, `test.describe` blocks, and tests.",
+            "scope": "resource"
+          },
+          "playwrightCliRunner.codeLens.pattern": {
+            "type": "string",
+            "default": "**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+            "markdownDescription": "Glob pattern selecting documents that receive Playwright CodeLens actions.",
+            "scope": "resource"
           }
         }
       }
     ],
     "commands": [
       {
-        "command": "playwright.runTest",
-        "title": "Run Playwright Test"
+        "command": "playwrightCliRunner.refreshTests",
+        "title": "Refresh Tests",
+        "category": "Playwright",
+        "icon": "$(refresh)"
       },
       {
-        "command": "playwright.runCurrentFile",
-        "title": "Run Playwright Test on File"
+        "command": "playwrightCliRunner.configureProjects",
+        "title": "Configure CLI Projects",
+        "category": "Playwright",
+        "icon": "$(checklist)"
       },
       {
-        "command": "playwright.runTestPath",
-        "title": "Run Playwright Test on File"
+        "command": "playwrightCliRunner.openOfficialSettings",
+        "title": "Open Microsoft Playwright Settings",
+        "category": "Playwright",
+        "icon": "$(settings-gear)"
       },
       {
-        "command": "playwright.debugTest",
-        "title": "Debug Playwright Test"
+        "command": "playwrightCliRunner.runTest",
+        "title": "Run Test",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.debugCurrentFile",
-        "title": "Debug Playwright Test on File"
+        "command": "playwrightCliRunner.runFile",
+        "title": "Run All Tests in File",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.debugTestPath",
-        "title": "Debug Playwright Test on File"
+        "command": "playwrightCliRunner.debugTest",
+        "title": "Debug Test",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.inspectTest",
-        "title": "Inspector Playwright Test"
+        "command": "playwrightCliRunner.debugFile",
+        "title": "Debug All Tests in File",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.runPrevTest",
-        "title": "Previous Playwright Test"
+        "command": "playwrightCliRunner.inspectTest",
+        "title": "Run Test with Playwright Inspector",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.runTestAndUpdateSnapshots",
-        "title": "Run Playwright Test and Update Snapshots"
+        "command": "playwrightCliRunner.openUi",
+        "title": "Open in Playwright UI",
+        "category": "Playwright",
+        "icon": "$(browser)"
       },
       {
-        "command": "playwright.runCurrentFileWithCoverage",
-        "title": "Run Playwright Test with Coverage"
+        "command": "playwrightCliRunner.rerunLast",
+        "title": "Rerun Last Run",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.showTestReport",
-        "title": "Show Playwright Test Suite Report"
+        "command": "playwrightCliRunner.showReport",
+        "title": "Show HTML Report",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.showTrace",
-        "title": "Show Playwright Trace"
+        "command": "playwrightCliRunner.showTrace",
+        "title": "Show Trace",
+        "category": "Playwright"
       },
       {
-        "command": "playwright.codeGen",
-        "title": "Generate Playwright Test Code"
+        "command": "playwrightCliRunner.recordTest",
+        "title": "Record New Test (Codegen)",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCliRunner.migrateSettings",
+        "title": "Migrate Legacy Settings",
+        "category": "Playwright"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "playwright.runTestPath",
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "group": "playwright"
+          "command": "playwrightCliRunner.runFile",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@1"
         },
         {
-          "command": "playwright.debugTestPath",
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "group": "playwright"
+          "command": "playwrightCliRunner.debugFile",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@2"
         },
         {
-          "command": "playwright.showTestReport",
-          "when": "resourceLangId == json",
-          "group": "playwright"
+          "command": "playwrightCliRunner.openUi",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@3"
         },
         {
-          "command": "playwright.showTrace",
+          "command": "playwrightCliRunner.showTrace",
           "when": "resourceExtname == .zip",
-          "group": "playwright"
+          "group": "playwright@4"
         },
         {
-          "command": "playwright.codeGen",
+          "command": "playwrightCliRunner.recordTest",
           "when": "explorerResourceIsFolder",
-          "group": "playwright"
+          "group": "playwright@5"
         }
       ],
       "editor/context": [
         {
-          "command": "playwright.runTest",
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "group": "playwright"
+          "command": "playwrightCliRunner.runTest",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@1"
         },
         {
-          "command": "playwright.debugTest",
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "group": "playwright"
+          "command": "playwrightCliRunner.debugTest",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@2"
         },
         {
-          "command": "playwright.showTestReport",
+          "command": "playwrightCliRunner.inspectTest",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@3"
+        },
+        {
+          "command": "playwrightCliRunner.openUi",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "playwright@4"
+        },
+        {
+          "command": "playwrightCliRunner.showReport",
           "when": "resourceLangId == json",
-          "group": "playwright"
+          "group": "playwright@5"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "playwrightCliRunner.runFile",
+          "when": "resourceLangId == javascript || resourceLangId == typescript || resourceLangId == javascriptreact || resourceLangId == typescriptreact",
+          "group": "navigation@1"
         }
       ]
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
-    "compile": "webpack --mode production",
-    "watch": "webpack --mode production --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
-    "test-compile": "tsc -p ./",
-    "test-watch": "tsc -watch -p ./",
-    "pretest": "npm run test-compile && npm run lint",
-    "lint": "eslint src --ext ts",
-    "test": "node ./out/test/runTest.js"
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "pretest": "npm run typecheck && npm run lint",
+    "test": "npm run test:unit && npm run test:extension",
+    "test:unit": "npm run test:compile && mocha --config .mocharc.json",
+    "test:extension": "npm run package && npm run test:compile && npm run test:fixture && vscode-test",
+    "test:compile": "node scripts/clean-test-output.js && tsc -p ./",
+    "test:fixture": "npm ci --prefix fixtures/basic --ignore-scripts",
+    "test:watch": "tsc -watch -p ./",
+    "vsix": "vsce package --no-dependencies"
   },
   "devDependencies": {
-    "@babel/parser": "^7.14.7",
-    "@babel/types": "^7.14.5",
-    "@types/cross-spawn": "^6.0.2",
-    "@types/glob": "^7.1.3",
-    "@types/mocha": "^8.2.2",
-    "@types/node": "14.x",
-    "@types/vscode": "^1.56.0",
-    "@typescript-eslint/eslint-plugin": "^4.26.0",
-    "@typescript-eslint/parser": "^4.26.0",
-    "eslint": "^7.27.0",
-    "glob": "^7.1.7",
-    "mocha": "^8.4.0",
-    "ts-loader": "^9.2.2",
-    "typescript": "^4.3.2",
-    "vscode-test": "^1.5.2",
-    "webpack": "^5.38.1",
-    "webpack-cli": "^4.7.0"
-  },
-  "dependencies": {
-    "cross-spawn": "^7.0.3",
-    "deepmerge": "^4.2.2"
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.14.0",
+    "@types/vscode": "1.93.0",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "@vscode/vsce": "^3.1.0",
+    "esbuild": "^0.23.0",
+    "eslint": "^9.9.0",
+    "mocha": "^10.7.0",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.1.0"
   }
 }
