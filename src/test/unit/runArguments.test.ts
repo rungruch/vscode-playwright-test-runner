@@ -57,11 +57,11 @@ suite('runArguments', () => {
       [
         'test', '--ui',
         '--config', '/ws/playwright.config.ts',
+        'tests/login.spec.ts',
         '--project', 'chromium',
         '--project', 'webkit',
         '--headed',
         '--grep', 'Login flow',
-        'tests/login.spec.ts',
       ],
     );
   });
@@ -75,9 +75,9 @@ suite('runArguments', () => {
       [
         'test', '--debug',
         '--config', '/ws/playwright.config.ts',
+        'tests/login.spec.ts',
         '--project', 'chromium',
         '--grep', 'Login succeeds(?:\\s+@\\S+)*$',
-        'tests/login.spec.ts',
       ],
     );
   });
@@ -95,8 +95,8 @@ suite('runArguments', () => {
       [
         'test', '--debug',
         '--config', '/work space/configs/playwright custom.config.ts',
-        '--timeout=2500',
         'e2e tests/login.spec.ts',
+        '--timeout=2500',
       ],
     );
   });
@@ -107,5 +107,17 @@ suite('runArguments', () => {
       { cwd: '/ws' },
     );
     assert.ok(args.includes('/elsewhere/x.spec.ts'));
+  });
+
+  test('builds a Playwright file:line filter for generated cases', () => {
+    const args = buildDebugArguments(
+      { files: ['/ws/tests/dynamic.spec.ts'], titleFilters: [], line: 17 },
+      { cwd: '/ws', projects: ['chromium'] },
+    );
+    assert.deepStrictEqual(args, [
+      'test', '--debug',
+      'tests/dynamic.spec.ts:17',
+      '--project', 'chromium',
+    ]);
   });
 });

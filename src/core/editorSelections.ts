@@ -20,6 +20,8 @@ export interface EditorTestSelection {
   fullTitle?: string;
   /** Individual describe/test titles, preserving boundaries for CLI grep. */
   titlePath?: string[];
+  /** Multiple generated tests collapsed at the same source declaration. */
+  titlePaths?: string[][];
 }
 
 /** Flattens one discovered file into source-ordered editor actions. */
@@ -49,7 +51,7 @@ export function editorSelectionsForFile(
     appendTest(selections, model.id, uri, test, []);
   }
 
-  return deduplicateSelections(selections).sort((a, b) => {
+  return collapseSelections(selections).sort((a, b) => {
     if (a.kind === 'file' && b.kind === 'file') {
       return 0;
     }
@@ -112,22 +114,32 @@ function appendTest(
   });
 }
 
-function deduplicateSelections(selections: EditorTestSelection[]): EditorTestSelection[] {
-  const seen = new Set<string>();
-  return selections.filter((selection) => {
+function collapseSelections(selections: EditorTestSelection[]): EditorTestSelection[] {
+  const byLocation = new Map<string, EditorTestSelection>();
+  for (const selection of selections) {
     const key = [
       selection.kind,
       path.normalize(selection.file),
       selection.position.line,
       selection.position.character,
-      ...(selection.titlePath ?? []),
     ].join('\0');
-    if (seen.has(key)) {
-      return false;
+    const existing = byLocation.get(key);
+    if (!existing) {
+      byLocation.set(key, selection);
+      continue;
     }
-    seen.add(key);
-    return true;
-  });
+    mergeTitlePaths(existing, selection);
+  }
+  return [...byLocation.values()];
+}
+
+function mergeTitlePaths(target: EditorTestSelection, incoming: EditorTestSelection): void {
+  const paths = [
+    ...(target.titlePaths ?? (target.titlePath ? [target.titlePath] : [])),
+    ...(incoming.titlePaths ?? (incoming.titlePath ? [incoming.titlePath] : [])),
+  ];
+  const unique = new Map(paths.map((titles) => [titles.join('\0'), titles]));
+  target.titlePaths = [...unique.values()];
 }
 
 function toPosition(line: number, column: number): { line: number; character: number } {

@@ -93,4 +93,28 @@ suite('editorSelections', () => {
     const selections = editorSelectionsForFile(duplicated, FILE, 'file:///workspace/tests/example.spec.ts');
     assert.deepStrictEqual(selections.map((selection) => selection.kind), ['file', 'test']);
   });
+
+  test('collapses data-driven cases at one declaration into one selection', () => {
+    const generated: DiscoveredConfig = {
+      ...MODEL,
+      files: [{
+        ...MODEL.files[0],
+        suites: [],
+        tests: [1, 2, 3].map((value) => ({
+          ...MODEL.files[0].tests[0],
+          id: `dynamic-${value}`,
+          title: `dynamic case ${value}`,
+          fullTitle: `dynamic case ${value}`,
+          location: { file: FILE, line: 30, column: 3 },
+        })),
+      }],
+    };
+    const selections = editorSelectionsForFile(generated, FILE, 'file:///workspace/tests/example.spec.ts');
+    assert.strictEqual(selections.length, 2);
+    assert.deepStrictEqual(selections[1].titlePaths, [
+      ['dynamic case 1'],
+      ['dynamic case 2'],
+      ['dynamic case 3'],
+    ]);
+  });
 });

@@ -7,6 +7,8 @@ export interface RunSelection {
   files: string[];
   /** Escaped title-path regexes for selected tests or suites. */
   titleFilters: string[];
+  /** Optional 1-based source line for generated tests sharing a declaration. */
+  line?: number;
 }
 
 export interface UiArgumentOptions {
@@ -66,6 +68,13 @@ function buildInteractiveArguments(
   if (options.configFile) {
     args.push('--config', options.configFile);
   }
+  // Keep positional file filters ahead of variadic CLI options such as
+  // `--project <project-name...>`, otherwise Playwright can consume a trailing
+  // `file:line` filter as another option value.
+  for (const file of selection.files) {
+    const fileFilter = relativeOrAbsolute(file, options.cwd);
+    args.push(selection.line ? `${fileFilter}:${selection.line}` : fileFilter);
+  }
   for (const project of options.projects ?? []) {
     if (project) {
       args.push('--project', project);
@@ -78,9 +87,6 @@ function buildInteractiveArguments(
   }
   if (selection.titleFilters.length > 0) {
     args.push('--grep', combineFilters(selection.titleFilters));
-  }
-  for (const file of selection.files) {
-    args.push(relativeOrAbsolute(file, options.cwd));
   }
   return args;
 }

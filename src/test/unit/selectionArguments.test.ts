@@ -34,4 +34,20 @@ suite('selectionArguments', () => {
       new RegExp(selection.titleFilters[0]),
     );
   });
+
+  test('uses a source-line filter for collapsed data-driven cases', () => {
+    const selection = cliSelectionForEditor({
+      ...BASE,
+      position: { line: 16, character: 2 },
+      titlePaths: [
+        ['Verify Badge', 'case one'],
+        ['Verify Badge', 'case two'],
+      ],
+    });
+    assert.deepStrictEqual(selection, {
+      files: [BASE.file],
+      titleFilters: [],
+      line: 17,
+    });
+  });
 });

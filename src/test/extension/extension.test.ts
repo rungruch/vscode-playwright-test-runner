@@ -59,6 +59,18 @@ suite('Playwright CLI Test Runner extension', () => {
     assert.ok(titles.has('$(eye) Inspect Test'));
   });
 
+  test('provides one CodeLens group for a data-driven test declaration', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'dynamic.spec.ts');
+    await vscode.workspace.openTextDocument(uri);
+    await api.discovery.refreshAll();
+    const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
+    const runLenses = (lenses ?? []).filter((lens) => lens.command?.title === '$(play) Run Test');
+
+    assert.strictEqual(runLenses.length, 1);
+    const selection = runLenses[0].command?.arguments?.[0] as { titlePaths?: string[][] } | undefined;
+    assert.strictEqual(selection?.titlePaths?.length, 3);
+  });
+
   test('a CodeLens run is executed exactly once by the Microsoft extension', async () => {
     const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
     try {

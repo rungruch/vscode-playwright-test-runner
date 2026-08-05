@@ -14,6 +14,8 @@
 - Raised requirements to VS Code 1.93, Node.js 20, and Playwright Test 1.38.
 - Fixed Inspector, UI, report, trace, and codegen terminals launching the VS Code Electron helper without Node mode on macOS.
 - Fixed Inspector/UI title filters for Playwright's project/file prefix, title separators, and trailing tags.
+- Collapsed loop-generated and data-driven tests at one source declaration into a single CodeLens group, with Inspector/UI scoped by `file:line`.
+- Placed CLI file filters before variadic project options so scoped Inspector/UI commands cannot be consumed as project names.
 - Fixed stale targets after settings changes, nested config routing, config creation/deletion, unsupported-version upgrades, duplicated project CodeLens entries, stale CLI projects, empty-setting precedence, custom-layout activation, and legacy string arguments.
 
 ## 1.4.1 - 2023-07-07
