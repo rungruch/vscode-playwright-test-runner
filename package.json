@@ -1,7 +1,7 @@
 {
-  "name": "playwright-cli-test-runner",
-  "displayName": "Playwright CLI Test Runner",
-  "description": "Playwright UI and Inspector CodeLens actions, plus Run and Debug delegated to the official Playwright extension",
+  "name": "playwright-codelens-runner",
+  "displayName": "Playwright CodeLens Runner",
+  "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
   "version": "2.0.0",
   "publisher": "rungruch",
   "author": {
@@ -27,6 +27,8 @@
   ],
   "keywords": [
     "playwright",
+    "codelens",
+    "inspector",
     "test",
     "testing",
     "e2e"
@@ -73,7 +75,7 @@
   "contributes": {
     "configuration": [
       {
-        "title": "Playwright CLI Test Runner",
+        "title": "Playwright CodeLens Runner",
         "properties": {
           "playwrightCliRunner.configFiles": {
             "type": "array",
@@ -112,6 +114,24 @@
             },
             "default": [],
             "markdownDescription": "Extra CLI options appended to companion Inspector and Playwright UI runs. Native Run/Debug options are owned by the Microsoft Playwright extension (see https://playwright.dev/docs/test-cli).",
+            "scope": "resource"
+          },
+          "playwrightCliRunner.inspector.browser": {
+            "type": "string",
+            "enum": [
+              "config",
+              "chromium",
+              "firefox",
+              "webkit"
+            ],
+            "enumDescriptions": [
+              "Use the Playwright config and the companion's configured CLI projects.",
+              "Use the config project named chromium, or Playwright's Chromium browser when no projects are defined.",
+              "Use the config project named firefox, or Playwright's Firefox browser when no projects are defined.",
+              "Use the config project named webkit, or Playwright's WebKit browser when no projects are defined."
+            ],
+            "default": "config",
+            "markdownDescription": "Browser used only by **Inspect Test/Suite**. `config` preserves Playwright config behavior and **Configure CLI Projects**. A forced browser selects the same-named config project; Playwright does not permit `--browser` when a config defines projects.",
             "scope": "resource"
           },
           "playwrightCliRunner.environment": {

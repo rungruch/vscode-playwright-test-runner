@@ -2,6 +2,7 @@
 
 ## 2.0.0 - 2026-08-05
 
+- Rebranded the independent 2.0 rewrite as **Playwright CodeLens Runner** with the marketplace identity `rungruch.playwright-codelens-runner`.
 - Reworked the extension into a required CodeLens companion for `ms-playwright.playwright`.
 - Delegated editor Run and Debug actions to VS Code Testing so Microsoft remains the sole TestController and owns status, output, duration, and debugging.
 - Added default CodeLens actions for files, nested `test.describe` suites, top-level tests, and duplicate titles.
@@ -16,6 +17,7 @@
 - Fixed Inspector/UI title filters for Playwright's project/file prefix, title separators, and trailing tags.
 - Collapsed loop-generated and data-driven tests at one source declaration into a single CodeLens group, with Inspector/UI scoped by `file:line`.
 - Placed CLI file filters before variadic project options so scoped Inspector/UI commands cannot be consumed as project names.
+- Added an Inspector-only browser setting that defaults to config behavior and can force a matching Chromium, Firefox, or WebKit project.
 - Fixed stale targets after settings changes, nested config routing, config creation/deletion, unsupported-version upgrades, duplicated project CodeLens entries, stale CLI projects, empty-setting precedence, custom-layout activation, and legacy string arguments.
 
 ## 1.4.1 - 2023-07-07

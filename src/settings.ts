@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { InspectorBrowser, isInspectorBrowser } from './core/inspectorBrowser';
 import { LEGACY_NAMESPACE, NEW_NAMESPACE, legacyProjectSeed } from './core/legacySettings';
 import {
   preferExplicit,
@@ -92,6 +93,12 @@ export class Settings {
       return legacy;
     }
     return this.withDefault<string[]>('runOptions', []);
+  }
+
+  /** Browser/project override applied only to Playwright Inspector commands. */
+  get inspectorBrowser(): InspectorBrowser {
+    const value = this.withDefault<string>('inspector.browser', 'config');
+    return isInspectorBrowser(value) ? value : 'config';
   }
 
   get environment(): Record<string, string> {

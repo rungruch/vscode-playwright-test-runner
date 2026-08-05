@@ -82,6 +82,16 @@ suite('runArguments', () => {
     );
   });
 
+  test('forces a browser for configless Inspector runs', () => {
+    assert.deepStrictEqual(
+      buildDebugArguments(
+        { files: ['/ws/tests/login.spec.ts'], titleFilters: [] },
+        { cwd: '/ws', browser: 'firefox' },
+      ),
+      ['test', '--debug', 'tests/login.spec.ts', '--browser', 'firefox'],
+    );
+  });
+
   test('preserves config, cwd, and file paths containing spaces as argument tokens', () => {
     assert.deepStrictEqual(
       buildDebugArguments(

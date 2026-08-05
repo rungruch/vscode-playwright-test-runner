@@ -54,7 +54,7 @@ export async function migrateSettings(): Promise<void> {
 
   const document = await vscode.workspace.openTextDocument({
     language: 'markdown',
-    content: `# Playwright CLI Test Runner — settings migration preview\n\n${lines.join('\n')}`,
+    content: `# Playwright CodeLens Runner — settings migration preview\n\n${lines.join('\n')}`,
   });
   await vscode.window.showTextDocument(document, { preview: true });
 

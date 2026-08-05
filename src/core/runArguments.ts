@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { ForcedInspectorBrowser } from './inspectorBrowser';
 
 /** Builds Playwright CLI arguments for discovery and companion CLI tools. */
 
@@ -12,6 +13,7 @@ export interface RunSelection {
 }
 
 export interface UiArgumentOptions {
+  browser?: ForcedInspectorBrowser;
   configFile?: string;
   cwd: string;
   projects?: string[];
@@ -74,6 +76,9 @@ function buildInteractiveArguments(
   for (const file of selection.files) {
     const fileFilter = relativeOrAbsolute(file, options.cwd);
     args.push(selection.line ? `${fileFilter}:${selection.line}` : fileFilter);
+  }
+  if (options.browser) {
+    args.push('--browser', options.browser);
   }
   for (const project of options.projects ?? []) {
     if (project) {

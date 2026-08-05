@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as vscode from 'vscode';
 import type { ExtensionApi } from '../../extension';
 
-suite('Playwright CLI Test Runner extension', () => {
+suite('Playwright CodeLens Runner extension', () => {
   let api: ExtensionApi;
   let fixture: vscode.WorkspaceFolder;
 
@@ -11,7 +11,7 @@ suite('Playwright CLI Test Runner extension', () => {
     assert.ok(official, 'the required Microsoft Playwright extension is installed');
     await official.activate();
 
-    const extension = vscode.extensions.getExtension<ExtensionApi>('rungruch.playwright-cli-test-runner');
+    const extension = vscode.extensions.getExtension<ExtensionApi>('rungruch.playwright-codelens-runner');
     assert.ok(extension, 'extension is installed in the development host');
     api = await extension.activate();
     assert.ok(api, 'extension activates in a trusted workspace');

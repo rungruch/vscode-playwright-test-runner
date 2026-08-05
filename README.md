@@ -1,12 +1,14 @@
-# Playwright CLI Test Runner
+# Playwright CodeLens Runner
 
-Playwright UI and Inspector actions beside every test, plus convenient CodeLens Run and Debug actions backed by Microsoft's official Playwright extension.
+<p align="center">
+  <img src="public/icon.png" width="128" alt="Playwright CodeLens Runner icon">
+</p>
 
-This extension is a required companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft owns the Testing view, test status, output, duration, project/config selection, and debugger. This companion adds editor-first actions and scoped Playwright CLI tools without creating a second TestController or running a native test twice.
+Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
 
-## Editor actions
+Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
 
-Open a `*.spec.*` or `*.test.*` file and use the actions where you are already reading and writing tests:
+## CodeLens at a glance
 
 ```text
 Run File · Debug File · Playwright UI
@@ -18,83 +20,111 @@ test.describe('checkout', () => {
   test('submits an order', async ({ page }) => {
 ```
 
-The actions have two intentionally different owners:
-
-| Action | Owner | Where results appear |
+| Action | Execution owner | Result location |
 | --- | --- | --- |
-| Run / Debug | Microsoft Playwright extension | VS Code Testing view, gutter, output, and debugger |
-| Inspect | This companion runs `playwright test --debug` | Playwright Inspector and the companion terminal |
-| Playwright UI | This companion runs `playwright test --ui` | Playwright UI and the companion terminal |
+| Run / Debug | Microsoft Playwright extension | VS Code Testing, gutter, output, duration, and debugger |
+| Inspect | Playwright CodeLens Runner | Playwright Inspector and an integrated terminal |
+| Playwright UI | Playwright CodeLens Runner | Playwright UI and an integrated terminal |
 
-For suites and tests, Run/Debug temporarily opens the document, moves the caret to the CodeLens location, and delegates to VS Code's Testing command. The caret stays on that test so Microsoft's asynchronous discovery can resolve the intended item reliably.
+Run and Debug delegate to VS Code Testing, so editor actions update the same Microsoft-owned test results as the Testing view. Inspector and UI intentionally remain standalone CLI sessions and do not create duplicate native test runs.
 
-## Features
+## Why use it
 
-- File-, suite-, and test-level Run and Debug CodeLens actions delegated to Microsoft
-- Suite- and test-scoped Playwright Inspector and file-, suite-, and test-scoped Playwright UI
-- Exact title filters for nested suites, top-level tests, and duplicate test titles
-- Automatic local CLI and package-manager detection for discovery and companion CLI tools
-- Multiple configs, multi-root workspaces, and monorepo working directories
-- Separately persisted multi-select CLI projects for Inspector and Playwright UI
-- HTML report, trace, and codegen commands
-- Read-compatible migration from the former `playwrightrunner.*` settings
+- Run or debug a file, suite, or test without leaving the editor.
+- Open an exact suite or test in Playwright Inspector or Playwright UI.
+- Keep Microsoft as the sole `TestController`, avoiding duplicate execution and competing results.
+- Discover nested suites, top-level tests, duplicate titles, and data-driven cases through Playwright itself.
+- Collapse loop-generated cases at one source declaration into one CodeLens group.
+- Work across multiple configs, workspace roots, and nested monorepo packages.
+- Preserve config, working directory, environment, extra options, and paths containing spaces.
+- Choose companion CLI projects independently from Microsoft's private project selection.
 
 ## Requirements
 
 - VS Code 1.93 or newer
-- [Microsoft Playwright extension](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright) (declared as an extension dependency)
+- [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright), installed automatically as an extension dependency
 - Node.js 20 or newer on the extension host
 - `@playwright/test` 1.38 or newer in the workspace or a parent package root
-
-The workspace must be trusted because Playwright loads configuration and test code during companion discovery and CLI operations.
+- A trusted workspace, because Playwright discovery and CLI tools execute workspace configuration and test code
 
 ## Getting started
 
-1. Install this extension. VS Code also installs the required Microsoft Playwright extension.
+1. Install **Playwright CodeLens Runner**. VS Code also installs Microsoft's required Playwright extension.
 2. Open a trusted workspace containing a Playwright config or test file.
-3. Configure the official extension's enabled browsers, projects, and configs from the Testing view.
-4. Open a test file and use the CodeLens actions.
-5. Optionally run **Playwright: Configure CLI Projects** to restrict only Inspector and Playwright UI operations.
+3. Configure native projects and browsers in Microsoft's Testing view.
+4. Open a `*.spec.*` or `*.test.*` file and use its CodeLens actions.
+5. Optionally run **Playwright: Configure CLI Projects** for Inspector and Playwright UI.
 
-Config files named `playwright.config.{js,cjs,mjs,ts,cts,mts}` are discovered automatically. Configless projects are also supported. In a monorepo, each discovered config becomes a companion CLI target. Microsoft continues to own its own configuration and project selection; this extension never reads Microsoft's private storage or extension internals.
+Standard `playwright.config.{js,cjs,mjs,ts,cts,mts}` files are discovered automatically. Explicit configs, custom test patterns, configless workspaces, multi-root workspaces, and nested monorepos are also supported.
+
+## Inspector browser
+
+Inspector follows the Playwright config and configured CLI projects by default. To force one browser only for **Inspect Test/Suite**, set:
+
+```json
+{
+  "playwrightCliRunner.inspector.browser": "firefox"
+}
+```
+
+Available values are `config`, `chromium`, `firefox`, and `webkit`.
+
+- `config` preserves Playwright config behavior and **Configure CLI Projects** selections.
+- With named config projects, a forced browser selects the same-named project.
+- When no projects are defined, the extension uses Playwright's `--browser` option.
+- If projects use custom names, keep `config` and select them through **Configure CLI Projects**.
+
+This setting affects Inspector only. It does not change Playwright UI or Microsoft-owned Run/Debug behavior.
+
+## Project ownership
+
+Microsoft's enabled configs and projects are private to the official extension and control native Run/Debug. Playwright CodeLens Runner never reads Microsoft internals.
+
+**Configure CLI Projects** stores a separate project selection for Inspector and Playwright UI. This separation is intentional: changing companion CLI projects cannot silently alter the official Testing view.
 
 ## Commands
 
-Use the Command Palette and search for **Playwright**:
+Open the Command Palette and search for **Playwright**:
 
-- **Refresh Tests** — refreshes Microsoft Testing and companion CodeLens discovery
-- **Configure CLI Projects** — selects projects only for Inspector and Playwright UI
+- **Refresh Tests**
+- **Configure CLI Projects**
 - **Open Microsoft Playwright Settings**
-- **Run Test** / **Debug Test** / **Run All Tests in File** / **Debug All Tests in File**
+- **Run Test** / **Debug Test**
+- **Run All Tests in File** / **Debug All Tests in File**
 - **Run Test with Playwright Inspector**
 - **Open in Playwright UI**
-- **Rerun Last Run** — delegates to VS Code Testing
+- **Rerun Last Run**
 - **Show HTML Report** / **Show Trace**
 - **Record New Test (Codegen)**
 - **Migrate Legacy Settings**
 
-Snapshot updates and JSON report imports are no longer supplied by this companion. Use the official extension's snapshot configuration and native Testing workflow instead.
+Refresh and Rerun delegate to VS Code Testing. Report, trace, codegen, Inspector, and UI use the resolved workspace Playwright CLI.
 
 ## Settings
 
+The `playwrightCliRunner.*` namespace is retained for compatibility with the unreleased 2.0 rewrite and existing workspace configuration.
+
 | Setting | Purpose | Default |
 | --- | --- | --- |
-| `playwrightCliRunner.configFiles` | Explicit companion discovery/CLI config paths; empty enables automatic discovery | `[]` |
+| `playwrightCliRunner.configFiles` | Explicit discovery/CLI config paths; empty enables automatic discovery | `[]` |
 | `playwrightCliRunner.cli.executable` | Explicit CLI executable such as `npx`, `pnpm`, or a local binary | automatic |
 | `playwrightCliRunner.cli.arguments` | Arguments inserted before the Playwright subcommand | `[]` |
 | `playwrightCliRunner.workingDirectory` | Companion CLI working directory | config directory |
 | `playwrightCliRunner.runOptions` | Extra Inspector and Playwright UI options | `[]` |
-| `playwrightCliRunner.environment` | Environment for discovery and companion CLI processes | `{}` |
-| `playwrightCliRunner.codeLens.enabled` | Editor Run, Debug, Inspect, and UI actions | `true` |
-| `playwrightCliRunner.codeLens.pattern` | Files that receive editor actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
+| `playwrightCliRunner.inspector.browser` | Inspector browser/project override | `config` |
+| `playwrightCliRunner.environment` | Environment for discovery and CLI processes | `{}` |
+| `playwrightCliRunner.codeLens.enabled` | Enable editor actions | `true` |
+| `playwrightCliRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
 
-Paths and environment values support `${workspaceFolder}`, `${packageRoot}`, and `${configDir}`. These settings do not override the official extension's Run/Debug configuration.
+Paths and environment values support `${workspaceFolder}`, `${packageRoot}`, and `${configDir}`. These companion settings do not override Microsoft's native Run/Debug configuration.
 
-## Migrating from 1.x
+## Compatibility and migration
 
-Version 2 reads existing `playwrightrunner.*` settings when no equivalent new setting is explicitly configured. Run **Playwright: Migrate Legacy Settings** to copy supported values into the `playwrightCliRunner.*` namespace, review the preview, and remove the old entries when convenient.
+Version 2 can read former `playwrightrunner.*` settings when no equivalent new value is configured. Run **Playwright: Migrate Legacy Settings** to preview and copy supported settings into `playwrightCliRunner.*`.
 
-Legacy Run and Debug command IDs delegate to Microsoft. Removed snapshot-related aliases show a migration notice instead of starting a duplicate runner.
+Legacy Run and Debug command aliases delegate to Microsoft. Removed snapshot and JSON-import workflows show migration guidance instead of creating a second test controller.
+
+The new marketplace identity is `rungruch.playwright-codelens-runner`. If an earlier development VSIX is installed under `rungruch.playwright-cli-test-runner`, uninstall it before installing this package.
 
 ## Development
 
@@ -108,7 +138,11 @@ npm run package
 npm run vsix
 ```
 
-Extension-host tests run against VS Code 1.93.1 with `ms-playwright.playwright@1.1.19` and a one-project browserless fixture.
+Extension-host tests run on VS Code 1.93.1 with `ms-playwright.playwright@1.1.19` and a browserless Playwright fixture.
+
+## Thanks
+
+This project began as a fork of [sakamoto66/vscode-playwright-test-runner](https://github.com/sakamoto66/vscode-playwright-test-runner). Thank you to Sakamoto and the original project's contributors for the foundation that made this rework possible.
 
 ## License
 

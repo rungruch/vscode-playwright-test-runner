@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { ForcedInspectorBrowser, resolveInspectorBrowser } from './core/inspectorBrowser';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import {
   buildDebugArguments,
@@ -13,6 +14,7 @@ import { migrateSettings } from './migrate';
 import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
 import { RunTarget, targetLabel } from './runTarget';
+import { Settings } from './settings';
 
 export interface CommandDeps {
   context: vscode.ExtensionContext;
@@ -98,9 +100,26 @@ async function interactiveCliCommand(
   if (!target) {
     return;
   }
-  const projects = await deps.projects.getProjects(target);
+  let projects = await deps.projects.getProjects(target);
+  let browser: ForcedInspectorBrowser | undefined;
+  if (mode === 'debug') {
+    const preference = new Settings(vscode.Uri.file(selection.file)).inspectorBrowser;
+    const model = preference === 'config'
+      ? deps.discovery.cachedModel(target.id)
+      : deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
+    const resolved = resolveInspectorBrowser(preference, projects, model?.projects);
+    if (resolved.error) {
+      void vscode.window.showErrorMessage(
+        `${resolved.error} Choose "config" in playwrightCliRunner.inspector.browser or add the matching project.`,
+      );
+      return;
+    }
+    projects = resolved.projects;
+    browser = resolved.browser;
+  }
   const runSelection = cliSelectionForEditor(selection);
   const options = {
+    browser,
     configFile: target.configFile,
     cwd: target.cwd,
     projects,
