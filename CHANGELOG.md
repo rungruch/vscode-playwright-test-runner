@@ -1,5 +1,21 @@
 # Change Log
 
+## 2.0.0 - 2026-08-05
+
+- Reworked the extension into a required CodeLens companion for `ms-playwright.playwright`.
+- Delegated editor Run and Debug actions to VS Code Testing so Microsoft remains the sole TestController and owns status, output, duration, and debugging.
+- Added default CodeLens actions for files, nested `test.describe` suites, top-level tests, and duplicate titles.
+- Added exact file-, suite-, and test-scoped Playwright UI and Inspector CLI operations with separately persisted CLI project selection.
+- Added multiple-config, multi-root workspace, monorepo, config, working-directory, environment, and extra-option support for discovery and companion CLI tools.
+- Retained HTML report, trace, codegen, refresh, rerun, and settings migration commands; added a command to open Microsoft Playwright settings.
+- Removed the duplicate runner, TestController, live reporter, JSON report import, snapshot workflow, additional reporters, and Testing-item context contributions.
+- Changed the extension API to expose `{ discovery, projects, bridge }`.
+- Added the `playwrightCliRunner.*` settings namespace and assisted migration from `playwrightrunner.*`.
+- Raised requirements to VS Code 1.93, Node.js 20, and Playwright Test 1.38.
+- Fixed Inspector, UI, report, trace, and codegen terminals launching the VS Code Electron helper without Node mode on macOS.
+- Fixed Inspector/UI title filters for Playwright's project/file prefix, title separators, and trailing tags.
+- Fixed stale targets after settings changes, nested config routing, config creation/deletion, unsupported-version upgrades, duplicated project CodeLens entries, stale CLI projects, empty-setting precedence, custom-layout activation, and legacy string arguments.
+
 ## 1.4.1 - 2023-07-07
 
 - Fix: #17 Fixed incorrect parsing of environment variables.
