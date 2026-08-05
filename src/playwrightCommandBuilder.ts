@@ -87,7 +87,9 @@ export class PlaywrightCommandBuilder {
 
     args.push('test');
 
-    const testfile = path.basename(filePath.fsPath);
+    const testfile = RunnerConfig.changeDirectoryToWorkspaceRoot
+      ? path.relative(config.projectPath, filePath.fsPath)
+      : filePath.fsPath;
 
     args.push(quoter(escapeRegExpForPath(normalizePath(testfile))));
 

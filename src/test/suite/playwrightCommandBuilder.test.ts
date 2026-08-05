@@ -31,25 +31,37 @@ describe('playwrightCommandBuilder', () => {
 		
 		it('test 1', async () => {
 			const cmd = PlaywrightCommandBuilder.buildCommand(file);
-			assert.deepStrictEqual(`${command} test "mainpackage.spec.js"`, cmd);
+			assert.deepStrictEqual(`${command} test "tests/mainpackage.spec.js"`, cmd);
 		});	
 
 		it('test 2', async () => {
 			const cmd = PlaywrightCommandBuilder.buildCommand(file, 'testcase');
-			assert.deepStrictEqual(`${command} test "mainpackage.spec.js" -g "testcase"`, cmd);
+			assert.deepStrictEqual(`${command} test "tests/mainpackage.spec.js" -g "testcase"`, cmd);
 		});	
 
 		it('test 3', async () => {
 			const cmd = PlaywrightCommandBuilder.buildCommand(file, 'testcase', ['--a','--b']);
-			assert.deepStrictEqual(`${command} test "mainpackage.spec.js" -g "testcase" --a --b`, cmd);
+			assert.deepStrictEqual(`${command} test "tests/mainpackage.spec.js" -g "testcase" --a --b`, cmd);
 		});	
 
 		it('test 4', async () => {
 			await conf.update('playwrightConfigPath', 'playwright.config.js');
 			const cmd = PlaywrightCommandBuilder.buildCommand(file, 'testcase');
-			assert.deepStrictEqual(`${command} test "mainpackage.spec.js" -c "playwright.config.js" -g "testcase"`, cmd);
+			assert.deepStrictEqual(`${command} test "tests/mainpackage.spec.js" -c "playwright.config.js" -g "testcase"`, cmd);
 			await conf.update('playwrightConfigPath', undefined);
 		});	
+
+		it('uses the path relative to a nested package root', async () => {
+			const cmd = PlaywrightCommandBuilder.buildCommand(file2);
+			assert.deepStrictEqual(`${command} test "tests/subpackage.spec.js"`, cmd);
+		});
+
+		it('uses an absolute path when the command working directory is unchanged', async () => {
+			await conf.update('changeDirectoryToWorkspaceRoot', false);
+			const cmd = PlaywrightCommandBuilder.buildCommand(file);
+			assert.deepStrictEqual(`${command} test "${file.fsPath.replace(/\\/g, '/')}"`, cmd);
+			await conf.update('changeDirectoryToWorkspaceRoot', undefined);
+		});
 	});
 
 	describe('buildShowTraceCommand', () => {
@@ -113,7 +125,7 @@ describe('playwrightCommandBuilder', () => {
 			assert.deepStrictEqual(cmd, {
 				args: [
 				  "test",
-				  `mainpackage.spec.js`
+				  `tests/mainpackage.spec.js`
 				],
 				console: "internalConsole",
 				cwd: assetRootDir,
@@ -135,7 +147,7 @@ describe('playwrightCommandBuilder', () => {
 				args: [
 				  "abc",
 				  "test",
-				  `mainpackage.spec.js`
+				  `tests/mainpackage.spec.js`
 				],
 				console: "internalConsole",
 				cwd: assetRootDir,
@@ -156,7 +168,7 @@ describe('playwrightCommandBuilder', () => {
 				args: [
 				  "abc",
 				  "test",
-				  `mainpackage.spec.js`,
+				  `tests/mainpackage.spec.js`,
 				  "-g",
 				  "testcase"
 				],
@@ -179,7 +191,7 @@ describe('playwrightCommandBuilder', () => {
 				args: [
 				  "abc",
 				  "test",
-				  `mainpackage.spec.js`,
+				  `tests/mainpackage.spec.js`,
 				  "-g",
 				  "testcase",
 				  "--aa"
@@ -208,7 +220,7 @@ describe('playwrightCommandBuilder', () => {
 				args: [
 				  "abc",
 				  "test",
-				  `subpackage.spec.js`
+				  `tests/subpackage.spec.js`
 				],
 				console: "internalConsole",
 				cwd: assetRootDir+'/packages/subpackage',
@@ -230,7 +242,7 @@ describe('playwrightCommandBuilder', () => {
 			assert.deepStrictEqual(cmd, {
 				args: [
 				  "test",
-				  `mainpackage.spec.js`
+				  `tests/mainpackage.spec.js`
 				],
 				console: "internalConsole",
 				cwd: assetRootDir,

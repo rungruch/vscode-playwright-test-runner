@@ -24,6 +24,12 @@ describe('playwright-editor-support', () => {
   it('mainpackage.spec.js should find line 10', () => {
     const hit = findTestCode(testcodes2, 10);
     assert.deepStrictEqual(hit && hit.fullname,'describe 01 runs first 01');
+    assert.deepStrictEqual(hit && hit.testPattern,'describe\\s+01.*runs\\s+first\\s+01$');
+  });
+
+  it('uses a separator-tolerant pattern for a selected describe block', () => {
+    const hit = findTestCode(testcodes2, 9);
+    assert.deepStrictEqual(hit && hit.testPattern,'describe\\s+01.*');
   });
   
   it('mainpackage.spec.js should find line 11', () => {

@@ -19,15 +19,19 @@ export class TestCode {
   public type: string = '';
   public name: string = '';
   public fullname: string = '';
+  public titlePath: string[] = [];
   public startline: number = -1;
   public startcolumn: number = -1;
   public endline: number = -1;
   public endcolumn: number = -1;
   public get testPattern(): string | undefined {
+    const pattern = (this.titlePath.length ? this.titlePath : [this.fullname])
+      .map(resolveTestNameStringInterpolation)
+      .join('.*');
     if("test"===this.type) {
-      return resolveTestNameStringInterpolation(this.fullname)+"$";
+      return pattern+"$";
     }
-    return resolveTestNameStringInterpolation(this.fullname)+"\\s+\\S+";
+    return pattern+".*";
   }
 }
 
@@ -140,7 +144,7 @@ function findTestMethods(program: unknown): TestCode[] {
   });
   elements.forEach((element) => {
     const head = [''];
-    element.fullname = element.prefix
+    element.titlePath = element.prefix
       .split('/expression/')
       .filter((f) => 0 < f.length)
       .map((p) => {
@@ -148,8 +152,8 @@ function findTestMethods(program: unknown): TestCode[] {
         const el = elements.find((e) => e.prefix === head[0]);
         return el ? el.name : null;
       })
-      .filter((f) => f)
-      .join(' ');
+      .filter((f): f is string => Boolean(f));
+    element.fullname = element.titlePath.join(' ');
   });
   return elements;
 }
