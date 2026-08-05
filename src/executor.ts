@@ -2,7 +2,7 @@ import { ChildProcess, spawn } from 'child_process';
 import * as vscode from 'vscode';
 import { CliCommand, environmentForCli } from './core/cliResolution';
 
-export interface SpawnOutcome {
+interface SpawnOutcome {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   cancelled: boolean;

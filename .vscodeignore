@@ -7,12 +7,12 @@ scripts/**
 fixtures/**
 .gitignore
 .mocharc.json
-.vscode-test.js
-esbuild.js
+.vscode-test.mjs
+esbuild.mjs
 eslint.config.mjs
+knip.json
 tsconfig.json
 node_modules/**
 **/*.map
 **/*.ts
 **/*.vsix
-docs/**

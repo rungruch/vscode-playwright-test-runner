@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import { DiscoveryService } from './discoveryService';
 import { RunTarget } from './runTarget';
-import { Settings } from './settings';
+import { SETTINGS_NAMESPACE, Settings } from './settings';
 
 const TEST_DOCUMENTS: vscode.DocumentSelector = [
   { scheme: 'file', language: 'javascript' },
@@ -17,7 +17,7 @@ const TEST_DOCUMENTS: vscode.DocumentSelector = [
  * delegated to Microsoft's Playwright extension; Inspector and UI stay CLI
  * tools owned by this companion.
  */
-export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
+class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
   readonly onDidChangeCodeLenses = this.emitter.event;
@@ -26,7 +26,7 @@ export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vsco
     this.disposables.push(
       this.discovery.onDidDiscover(() => this.emitter.fire()),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration('playwrightCliRunner.codeLens') || event.affectsConfiguration('playwrightrunner')) {
+        if (event.affectsConfiguration(`${SETTINGS_NAMESPACE}.codeLens`)) {
           this.emitter.fire();
         }
       }),
@@ -56,17 +56,17 @@ export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vsco
     for (const selection of selections) {
       const range = rangeFor(selection);
       if (selection.kind === 'file') {
-        addLens(lenses, range, '$(play) Run File', 'playwrightCliRunner.runFile', selection);
-        addLens(lenses, range, '$(debug) Debug File', 'playwrightCliRunner.debugFile', selection);
-        addLens(lenses, range, '$(browser) Playwright UI', 'playwrightCliRunner.openUi', selection);
+        addLens(lenses, range, '$(play) Run File', 'playwrightCodeLensRunner.runFile', selection);
+        addLens(lenses, range, '$(debug) Debug File', 'playwrightCodeLensRunner.debugFile', selection);
+        addLens(lenses, range, '$(browser) Playwright UI', 'playwrightCodeLensRunner.openUi', selection);
         continue;
       }
 
       const label = selection.kind === 'suite' ? 'Suite' : 'Test';
-      addLens(lenses, range, `$(play) Run ${label}`, 'playwrightCliRunner.runTest', selection);
-      addLens(lenses, range, `$(debug) Debug ${label}`, 'playwrightCliRunner.debugTest', selection);
-      addLens(lenses, range, `$(eye) Inspect ${label}`, 'playwrightCliRunner.inspectTest', selection);
-      addLens(lenses, range, '$(browser) Playwright UI', 'playwrightCliRunner.openUi', selection);
+      addLens(lenses, range, `$(play) Run ${label}`, 'playwrightCodeLensRunner.runTest', selection);
+      addLens(lenses, range, `$(debug) Debug ${label}`, 'playwrightCodeLensRunner.debugTest', selection);
+      addLens(lenses, range, `$(eye) Inspect ${label}`, 'playwrightCodeLensRunner.inspectTest', selection);
+      addLens(lenses, range, '$(browser) Playwright UI', 'playwrightCodeLensRunner.openUi', selection);
     }
     return lenses;
   }

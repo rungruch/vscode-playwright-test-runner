@@ -1,7 +1,7 @@
 /** Minimum supported Playwright Test version. */
-export const MIN_PLAYWRIGHT_VERSION = '1.38.0';
+const MIN_PLAYWRIGHT_VERSION = '1.38.0';
 
-export function parseVersion(text: string): [number, number, number] | undefined {
+function parseVersion(text: string): [number, number, number] | undefined {
   const match = /(\d+)\.(\d+)\.(\d+)/.exec(text ?? '');
   if (!match) {
     return undefined;
@@ -9,7 +9,7 @@ export function parseVersion(text: string): [number, number, number] | undefined
   return [Number(match[1]), Number(match[2]), Number(match[3])];
 }
 
-export function compareVersions(a: [number, number, number], b: [number, number, number]): number {
+function compareVersions(a: [number, number, number], b: [number, number, number]): number {
   for (let i = 0; i < 3; i++) {
     if (a[i] !== b[i]) {
       return a[i] - b[i];

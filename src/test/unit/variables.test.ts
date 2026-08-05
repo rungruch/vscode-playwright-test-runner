@@ -5,14 +5,11 @@ const CONTEXT = {
   workspaceFolder: '/home/me/project',
   packageRoot: '/home/me/project/packages/app',
   configDir: '/home/me/project/packages/app/e2e',
-  currentFile: '/home/me/project/packages/app/e2e/tests/login.spec.ts',
 };
 
 suite('variables', () => {
-  test('substitutes workspace folder variants', () => {
+  test('substitutes the workspace folder variable', () => {
     assert.strictEqual(substituteVariables('${workspaceFolder}/e2e', CONTEXT), '/home/me/project/e2e');
-    assert.strictEqual(substituteVariables('${workspaceRoot}/e2e', CONTEXT), '/home/me/project/e2e');
-    assert.strictEqual(substituteVariables('${workspaceFolderBasename}', CONTEXT), 'project');
   });
 
   test('substitutes packageRoot and configDir', () => {
@@ -20,12 +17,14 @@ suite('variables', () => {
     assert.strictEqual(substituteVariables('${configDir}', CONTEXT), '/home/me/project/packages/app/e2e');
   });
 
-  test('substitutes current file variables', () => {
-    assert.strictEqual(substituteVariables('${currentFile}', CONTEXT), '/home/me/project/packages/app/e2e/tests/login.spec.ts');
-    assert.strictEqual(substituteVariables('${fileBasename}', CONTEXT), 'login.spec.ts');
-    assert.strictEqual(substituteVariables('${fileBasenameNoExtension}', CONTEXT), 'login.spec');
-    assert.strictEqual(substituteVariables('${fileExtname}', CONTEXT), '.ts');
-    assert.strictEqual(substituteVariables('${fileDirname}', CONTEXT), '/home/me/project/packages/app/e2e/tests');
+  test('does not substitute removed v1 variables', () => {
+    assert.strictEqual(substituteVariables('${workspaceRoot}/e2e', CONTEXT), '${workspaceRoot}/e2e');
+    assert.strictEqual(substituteVariables('${workspaceFolderBasename}', CONTEXT), '${workspaceFolderBasename}');
+    assert.strictEqual(substituteVariables('${currentFile}', CONTEXT), '${currentFile}');
+    assert.strictEqual(substituteVariables('${fileExtname}', CONTEXT), '${fileExtname}');
+    assert.strictEqual(substituteVariables('${fileBasename}', CONTEXT), '${fileBasename}');
+    assert.strictEqual(substituteVariables('${fileBasenameNoExtension}', CONTEXT), '${fileBasenameNoExtension}');
+    assert.strictEqual(substituteVariables('${fileDirname}', CONTEXT), '${fileDirname}');
   });
 
   test('replaces all occurrences', () => {

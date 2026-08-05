@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { registerCodeLensSupport } from './codeLens';
 import { registerCommands } from './commands';
 import { DiscoveryService } from './discoveryService';
-import { registerLegacyAliases } from './legacyAliases';
 import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
 
@@ -23,7 +22,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
 
   context.subscriptions.push(discovery);
   registerCommands({ context, discovery, bridge, projects });
-  registerLegacyAliases(context);
   registerCodeLensSupport(context, discovery);
 
   await bridge.activate();

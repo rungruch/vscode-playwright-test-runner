@@ -4,7 +4,7 @@
  * discoveries so CodeLens selections remain predictable across refreshes.
  */
 
-export interface DiscoveredLocation {
+interface DiscoveredLocation {
   file: string;
   line: number;
   column: number;

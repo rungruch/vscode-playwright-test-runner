@@ -32,15 +32,28 @@ suite('Playwright CodeLens Runner extension', () => {
     }
   });
 
-  test('registers the editor-first commands', async () => {
+  test('registers the CodeLens companion commands', async () => {
     const commands = new Set(await vscode.commands.getCommands(true));
-    assert.ok(commands.has('playwrightCliRunner.runTest'));
-    assert.ok(commands.has('playwrightCliRunner.debugTest'));
-    assert.ok(commands.has('playwrightCliRunner.inspectTest'));
-    assert.ok(commands.has('playwrightCliRunner.openUi'));
-    assert.ok(commands.has('playwrightCliRunner.openOfficialSettings'));
-    assert.ok(!commands.has('playwrightCliRunner.importJsonReport'));
-    assert.ok(!commands.has('playwrightCliRunner.updateSnapshots'));
+    assert.ok(commands.has('playwrightCodeLensRunner.runTest'));
+    assert.ok(commands.has('playwrightCodeLensRunner.debugTest'));
+    assert.ok(commands.has('playwrightCodeLensRunner.inspectTest'));
+    assert.ok(commands.has('playwrightCodeLensRunner.openUi'));
+    assert.ok(commands.has('playwrightCodeLensRunner.openOfficialSettings'));
+    assert.ok(!commands.has('playwrightCodeLensRunner.importJsonReport'));
+    assert.ok(!commands.has('playwrightCodeLensRunner.updateSnapshots'));
+  });
+
+  test('retains no legacy command identifiers', async () => {
+    const commands = new Set(await vscode.commands.getCommands(true));
+    for (const command of commands) {
+      assert.ok(
+        !command.startsWith('playwrightCliRunner.') && command !== 'playwrightCliRunner',
+        `legacy command ${command} must not be registered`,
+      );
+    }
+    assert.ok(!commands.has('playwrightCliRunner.migrateSettings'));
+    assert.ok(!commands.has('playwright.runTest'));
+    assert.ok(!commands.has('playwright.debugTest'));
   });
 
   test('provides file, suite, and test CodeLens actions', async () => {
@@ -95,7 +108,7 @@ suite('Playwright CodeLens Runner extension', () => {
   });
 
   test('rebuilds resolved targets when execution settings change', async () => {
-    const configuration = vscode.workspace.getConfiguration('playwrightCliRunner', fixture.uri);
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', fixture.uri);
     const previous = configuration.inspect<Record<string, string>>('environment')?.globalValue;
     const marker = `settings-${Date.now()}`;
     try {

@@ -41,9 +41,9 @@ Run and Debug delegate to VS Code Testing, so editor actions update the same Mic
 
 ## Requirements
 
-- VS Code 1.93 or newer
-- [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright), installed automatically as an extension dependency
-- Node.js 20 or newer on the extension host
+- VS Code 1.125 or newer on the extension host
+- [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright), installed automatically as an extension dependency. This extension is validated against the latest published official release, `1.1.19`, and remains pinned to it in the test matrix.
+- Node.js 22.13 or newer for contributors; Node.js 24 LTS is recommended. The extension host runtime itself is provided by VS Code.
 - `@playwright/test` 1.38 or newer in the workspace or a parent package root
 - A trusted workspace, because Playwright discovery and CLI tools execute workspace configuration and test code
 
@@ -63,7 +63,7 @@ Inspector follows the Playwright config and configured CLI projects by default. 
 
 ```json
 {
-  "playwrightCliRunner.inspector.browser": "firefox"
+  "playwrightCodeLensRunner.inspector.browser": "firefox"
 }
 ```
 
@@ -96,49 +96,83 @@ Open the Command Palette and search for **Playwright**:
 - **Rerun Last Run**
 - **Show HTML Report** / **Show Trace**
 - **Record New Test (Codegen)**
-- **Migrate Legacy Settings**
 
 Refresh and Rerun delegate to VS Code Testing. Report, trace, codegen, Inspector, and UI use the resolved workspace Playwright CLI.
 
 ## Settings
 
-The `playwrightCliRunner.*` namespace is retained for compatibility with the unreleased 2.0 rewrite and existing workspace configuration.
+All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 2.1 is a clean break: earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
-| `playwrightCliRunner.configFiles` | Explicit discovery/CLI config paths; empty enables automatic discovery | `[]` |
-| `playwrightCliRunner.cli.executable` | Explicit CLI executable such as `npx`, `pnpm`, or a local binary | automatic |
-| `playwrightCliRunner.cli.arguments` | Arguments inserted before the Playwright subcommand | `[]` |
-| `playwrightCliRunner.workingDirectory` | Companion CLI working directory | config directory |
-| `playwrightCliRunner.runOptions` | Extra Inspector and Playwright UI options | `[]` |
-| `playwrightCliRunner.inspector.browser` | Inspector browser/project override | `config` |
-| `playwrightCliRunner.environment` | Environment for discovery and CLI processes | `{}` |
-| `playwrightCliRunner.codeLens.enabled` | Enable editor actions | `true` |
-| `playwrightCliRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
+| `playwrightCodeLensRunner.configFiles` | Explicit discovery/CLI config paths; empty enables automatic discovery | `[]` |
+| `playwrightCodeLensRunner.cli.executable` | Explicit CLI executable such as `npx`, `pnpm`, or a local binary | automatic |
+| `playwrightCodeLensRunner.cli.arguments` | Arguments inserted before the Playwright subcommand | `[]` |
+| `playwrightCodeLensRunner.workingDirectory` | Companion CLI working directory | config directory |
+| `playwrightCodeLensRunner.runOptions` | Extra Inspector and Playwright UI options | `[]` |
+| `playwrightCodeLensRunner.inspector.browser` | Inspector browser/project override | `config` |
+| `playwrightCodeLensRunner.environment` | Environment for discovery and CLI processes | `{}` |
+| `playwrightCodeLensRunner.codeLens.enabled` | Enable editor actions | `true` |
+| `playwrightCodeLensRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
 
 Paths and environment values support `${workspaceFolder}`, `${packageRoot}`, and `${configDir}`. These companion settings do not override Microsoft's native Run/Debug configuration.
 
-## Compatibility and migration
+## Marketplace identity
 
-Version 2 can read former `playwrightrunner.*` settings when no equivalent new value is configured. Run **Playwright: Migrate Legacy Settings** to preview and copy supported settings into `playwrightCliRunner.*`.
-
-Legacy Run and Debug command aliases delegate to Microsoft. Removed snapshot and JSON-import workflows show migration guidance instead of creating a second test controller.
-
-The new marketplace identity is `rungruch.playwright-codelens-runner`. If an earlier development VSIX is installed under `rungruch.playwright-cli-test-runner`, uninstall it before installing this package.
+The marketplace identity is `rungruch.playwright-codelens-runner`. If an earlier development VSIX is installed under `rungruch.playwright-cli-test-runner`, uninstall it before installing this package.
 
 ## Development
 
+Contributors need Node.js 22.13 or newer (Node.js 24 LTS recommended).
+
 ```sh
 npm ci
-npm ci --prefix fixtures/basic
-npm run typecheck
-npm run lint
+npm run test:fixture
+npm run typecheck      # TypeScript 7
+npm run typecheck:ts6  # TypeScript 6 parity (temporary)
+npm run lint           # ESLint, zero warnings allowed
+npm run check:unused   # Knip
 npm test
 npm run package
 npm run vsix
 ```
 
-Extension-host tests run on VS Code 1.93.1 with `ms-playwright.playwright@1.1.19` and a browserless Playwright fixture.
+### TypeScript 7 and TypeScript 6 side by side
+
+[TypeScript 7 does not yet expose the compiler API](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/) that tools such as typescript-eslint require. The repository therefore follows Microsoft's documented side-by-side arrangement: native TypeScript 7 is the primary compiler for builds and type-checking, while TypeScript 6 is available only for tooling compatibility.
+
+```json
+{
+  "devDependencies": {
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  }
+}
+```
+
+`npm run typecheck` resolves `tsc` from TypeScript 7. `npm run typecheck:ts6` runs `tsc6` from the compatibility package as a temporary parity gate. TypeScript 6 can be removed once typescript-eslint supports native TypeScript 7.
+
+### Test matrix
+
+Extension-host tests install `ms-playwright.playwright@1.1.19` and run against browserless fixtures:
+
+| Suite | Host | Fixture |
+| --- | --- | --- |
+| Full basic fixture | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/basic` (Playwright `1.62.1`) |
+| Full basic fixture | Current stable VS Code `1.132.0` | `fixtures/basic` (Playwright `1.62.1`) |
+| Playwright compatibility smoke | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/pw138` (Playwright `1.38.0`) |
+| Multi-root nested discovery | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/multipkg` (Playwright `1.62.1`) |
+
+Playwright `1.38.0` remains the supported minimum despite newer maintained fixtures. The official Playwright extension remains pinned at its latest published release, `1.1.19`, in these tests.
+
+### Intentional dependency pins
+
+`npx --package npm-check-updates ncu` is rerun after upgrades. The following pins are deliberate rather than stale:
+
+- `@types/node` stays on 22 so declarations match the VS Code extension host runtime, not the latest major (26).
+- `@types/vscode` matches the declared engine floor (`1.125.0`).
+- `typescript` aliases TypeScript 6 solely for the compiler API; `@typescript/native` aliases TypeScript 7 for `tsc`.
+- `fixtures/pw138` keeps `@playwright/test` pinned to `1.38.0` to exercise the compatibility floor.
 
 ## Thanks
 

@@ -1,10 +1,7 @@
 import * as vscode from 'vscode';
-import { reconcileProjectSelection } from './core/projectSelection';
+import { projectStateKey, reconcileProjectSelection } from './core/projectSelection';
 import { DiscoveryService } from './discoveryService';
 import { RunTarget, targetLabel } from './runTarget';
-import { Settings } from './settings';
-
-const STATE_PREFIX = 'playwrightCliRunner.projects:';
 
 /**
  * Persisted multi-select project choice for companion CLI Inspector/UI runs.
@@ -12,8 +9,6 @@ const STATE_PREFIX = 'playwrightCliRunner.projects:';
  * official extension.
  */
 export class ProjectPicker {
-  private readonly seeded = new Set<string>();
-
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly discovery: DiscoveryService,
@@ -24,29 +19,17 @@ export class ProjectPicker {
    * projects" (no --project flags are passed).
    */
   async getProjects(target: RunTarget): Promise<string[]> {
-    const key = STATE_PREFIX + target.id;
+    const key = projectStateKey(target.id);
     const stored = this.context.workspaceState.get<string[]>(key);
-    if (stored) {
-      const projects = await this.knownProjects(target);
-      const reconciled = reconcileProjectSelection(stored, projects);
-      if (reconciled.length !== stored.length || reconciled.some((project, index) => project !== stored[index])) {
-        await this.context.workspaceState.update(key, reconciled);
-      }
-      return reconciled;
+    if (!stored) {
+      return [];
     }
-    if (!this.seeded.has(target.id)) {
-      this.seeded.add(target.id);
-      const settings = new Settings(target.workspaceFolder.uri);
-      const seed = settings.legacyProjectSeeds('inspect')
-        ?? settings.legacyProjectSeeds('run')
-        ?? settings.legacyProjectSeeds('debug');
-      if (seed && seed.length > 0) {
-        const reconciled = reconcileProjectSelection(seed, await this.knownProjects(target));
-        await this.context.workspaceState.update(key, reconciled);
-        return reconciled;
-      }
+    const projects = await this.knownProjects(target);
+    const reconciled = reconcileProjectSelection(stored, projects);
+    if (reconciled.length !== stored.length || reconciled.some((project, index) => project !== stored[index])) {
+      await this.context.workspaceState.update(key, reconciled);
     }
-    return [];
+    return reconciled;
   }
 
   /** Multi-select Quick Pick; persists the choice in workspace state. */
@@ -75,7 +58,7 @@ export class ProjectPicker {
     }
     const selected = result.map((r) => r.label);
     const allSelected = selected.length === projects.length || selected.length === 0;
-    await this.context.workspaceState.update(STATE_PREFIX + chosen.id, allSelected ? [] : selected);
+    await this.context.workspaceState.update(projectStateKey(chosen.id), allSelected ? [] : selected);
   }
 
   private async knownProjects(target: RunTarget): Promise<string[] | undefined> {

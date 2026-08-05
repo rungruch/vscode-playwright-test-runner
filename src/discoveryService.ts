@@ -7,7 +7,7 @@ import { isSupportedPlaywrightVersion } from './core/version';
 import { discoverRunTargets, isConfigFile, isTestFile } from './configDiscovery';
 import { probeCliVersion, spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
-import { Settings } from './settings';
+import { SETTINGS_NAMESPACE, Settings } from './settings';
 
 export interface TargetDiscovery {
   target: RunTarget;
@@ -58,7 +58,7 @@ export class DiscoveryService implements vscode.Disposable {
         this.queueRefreshAll();
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (!event.affectsConfiguration('playwrightCliRunner') && !event.affectsConfiguration('playwrightrunner')) {
+        if (!event.affectsConfiguration(SETTINGS_NAMESPACE)) {
           return;
         }
         this.cache.clear();
@@ -184,7 +184,7 @@ export class DiscoveryService implements vscode.Disposable {
     if (!this.unsupported.has(target.id)) {
       const probe = await probeCliVersion(target.cli, target.cwd, target.env);
       if (!probe.ok) {
-        const message = `Playwright CLI not found for ${target.configDir}. Install @playwright/test locally or set playwrightCliRunner.cli.executable. (tried: ${[target.cli.executable, ...target.cli.argsPrefix].join(' ')})`;
+        const message = `Playwright CLI not found for ${target.configDir}. Install @playwright/test locally or set playwrightCodeLensRunner.cli.executable. (tried: ${[target.cli.executable, ...target.cli.argsPrefix].join(' ')})`;
         this.errors.set(target.id, message);
         this.emitter.fire({ target, error: message });
         return undefined;

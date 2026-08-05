@@ -8,5 +8,4 @@ fixtures/**/node_modules
 fixtures/**/test-results
 fixtures/**/playwright-report
 fixtures/**/blob-report
-fixtures/**/.playwright-cli-test-runner
 fixtures/**/official-run-marker.txt

@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 // Bundles the extension with esbuild.
-// CommonJS/ES2022 output is required by the VS Code 1.93 baseline.
-const esbuild = require('esbuild');
-const fs = require('fs');
-const path = require('path');
+// CommonJS/ES2022 output is required for extension-runtime stability; the
+// ESM project root therefore emits the bundle as dist/extension.cjs.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as esbuild from 'esbuild';
+
+const rootDirectory = path.dirname(fileURLToPath(import.meta.url));
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -21,17 +25,17 @@ const shared = {
   sourcesContent: false,
   minify: production,
   logLevel: 'info',
-  outdir: 'dist',
 };
 
 /** @type {import('esbuild').BuildOptions[]} */
 const builds = [{
   ...shared,
   entryPoints: ['src/extension.ts'],
+  outfile: 'dist/extension.cjs',
 }];
 
 async function main() {
-  const output = path.resolve(__dirname, 'dist');
+  const output = path.resolve(rootDirectory, 'dist');
   if (path.basename(output) !== 'dist') {
     throw new Error(`Refusing to clean unexpected path: ${output}`);
   }

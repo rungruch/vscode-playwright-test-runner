@@ -1,7 +1,7 @@
 import * as path from 'path';
 import { DiscoveredConfig, DiscoveredSuite, DiscoveredTest } from './model';
 
-export type EditorTestSelectionKind = 'file' | 'suite' | 'test';
+type EditorTestSelectionKind = 'file' | 'suite' | 'test';
 
 /**
  * Serializable CodeLens/command payload. URI and position deliberately avoid

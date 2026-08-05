@@ -10,7 +10,6 @@ import { cliSelectionForEditor } from './core/selectionArguments';
 import { environmentForCli } from './core/cliResolution';
 import { quoteForTerminal } from './core/terminalQuote';
 import { DiscoveryService } from './discoveryService';
-import { migrateSettings } from './migrate';
 import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
 import { RunTarget, targetLabel } from './runTarget';
@@ -29,24 +28,23 @@ export function registerCommands(deps: CommandDeps): void {
   const register = (id: string, handler: (...args: any[]) => any) =>
     context.subscriptions.push(vscode.commands.registerCommand(id, handler));
 
-  register('playwrightCliRunner.refreshTests', async () => {
+  register('playwrightCodeLensRunner.refreshTests', async () => {
     await Promise.all([deps.bridge.refresh(), deps.discovery.refreshAll()]);
   });
-  register('playwrightCliRunner.configureProjects', () => deps.projects.configure());
-  register('playwrightCliRunner.openOfficialSettings', () => deps.bridge.openOfficialSettings());
-  register('playwrightCliRunner.rerunLast', () => deps.bridge.rerunLast());
-  register('playwrightCliRunner.migrateSettings', () => migrateSettings());
+  register('playwrightCodeLensRunner.configureProjects', () => deps.projects.configure());
+  register('playwrightCodeLensRunner.openOfficialSettings', () => deps.bridge.openOfficialSettings());
+  register('playwrightCodeLensRunner.rerunLast', () => deps.bridge.rerunLast());
 
-  register('playwrightCliRunner.runTest', (selection?: EditorTestSelection) => delegatedTestCommand(deps, selection, 'run'));
-  register('playwrightCliRunner.debugTest', (selection?: EditorTestSelection) => delegatedTestCommand(deps, selection, 'debug'));
-  register('playwrightCliRunner.runFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'run'));
-  register('playwrightCliRunner.debugFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'debug'));
-  register('playwrightCliRunner.inspectTest', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'debug'));
-  register('playwrightCliRunner.openUi', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'ui'));
+  register('playwrightCodeLensRunner.runTest', (selection?: EditorTestSelection) => delegatedTestCommand(deps, selection, 'run'));
+  register('playwrightCodeLensRunner.debugTest', (selection?: EditorTestSelection) => delegatedTestCommand(deps, selection, 'debug'));
+  register('playwrightCodeLensRunner.runFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'run'));
+  register('playwrightCodeLensRunner.debugFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'debug'));
+  register('playwrightCodeLensRunner.inspectTest', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'debug'));
+  register('playwrightCodeLensRunner.openUi', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'ui'));
 
-  register('playwrightCliRunner.showReport', () => showReportCommand(deps));
-  register('playwrightCliRunner.showTrace', (uri?: vscode.Uri) => showTraceCommand(deps, uri));
-  register('playwrightCliRunner.recordTest', (uri?: vscode.Uri) => recordTestCommand(deps, uri));
+  register('playwrightCodeLensRunner.showReport', () => showReportCommand(deps));
+  register('playwrightCodeLensRunner.showTrace', (uri?: vscode.Uri) => showTraceCommand(deps, uri));
+  register('playwrightCodeLensRunner.recordTest', (uri?: vscode.Uri) => recordTestCommand(deps, uri));
 }
 
 async function delegatedTestCommand(
@@ -110,7 +108,7 @@ async function interactiveCliCommand(
     const resolved = resolveInspectorBrowser(preference, projects, model?.projects);
     if (resolved.error) {
       void vscode.window.showErrorMessage(
-        `${resolved.error} Choose "config" in playwrightCliRunner.inspector.browser or add the matching project.`,
+        `${resolved.error} Choose "config" in playwrightCodeLensRunner.inspector.browser or add the matching project.`,
       );
       return;
     }

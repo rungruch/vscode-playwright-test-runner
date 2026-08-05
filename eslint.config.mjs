@@ -16,24 +16,18 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ['*.js', 'scripts/**/*.js'],
+    files: ['**/*.{js,mjs}'],
     languageOptions: {
-      sourceType: 'commonjs',
+      ecmaVersion: 'latest',
+      sourceType: 'module',
       globals: {
-        require: 'readonly',
-        module: 'writable',
         process: 'readonly',
         console: 'readonly',
-        __dirname: 'readonly',
+        URL: 'readonly',
         Buffer: 'readonly',
         setTimeout: 'readonly',
         clearTimeout: 'readonly',
-        setInterval: 'readonly',
-        clearInterval: 'readonly',
       },
-    },
-    rules: {
-      '@typescript-eslint/no-require-imports': 'off',
     },
   },
   {
@@ -62,7 +56,6 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
       curly: 'warn',
       eqeqeq: 'warn',
-      'no-throw-literal': 'warn',
       semi: 'warn',
     },
   },
