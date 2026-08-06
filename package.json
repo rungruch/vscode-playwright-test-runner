@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.0.1",
+  "version": "3.1.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -141,6 +141,75 @@
             },
             "default": {},
             "markdownDescription": "Environment variables added to companion CLI discovery, Inspector, UI, report, trace, and codegen processes. Values support variable substitution.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.flakeLab.repeatEach": {
+            "type": "number",
+            "minimum": 1,
+            "default": 10,
+            "markdownDescription": "Number of times Flake Lab runs each selected test.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.flakeLab.workers": {
+            "type": "number",
+            "minimum": 1,
+            "default": 1,
+            "markdownDescription": "Workers used by companion Flake Lab runs.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.flakeLab.retries": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 1,
+            "markdownDescription": "Retries used by companion Flake Lab runs.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.flakeLab.trace": {
+            "type": "string",
+            "enum": ["on", "off", "retain-on-failure", "on-first-retry", "on-all-retries"],
+            "default": "on",
+            "markdownDescription": "Trace mode forced for Flake Lab.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.flakeLab.failOnFlakyTests": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Pass --fail-on-flaky-tests to Flake Lab. Requires Playwright Test 1.52 or newer.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.ui.profiles": {
+            "type": "array",
+            "default": [],
+            "items": {
+              "type": "object",
+              "required": ["name", "host", "port"],
+              "properties": {
+                "name": { "type": "string" },
+                "host": { "type": "string" },
+                "port": { "type": "number", "minimum": 1, "maximum": 65535 }
+              }
+            },
+            "markdownDescription": "Named Playwright UI host/port profiles. Non-loopback hosts prompt before launch.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.ui.defaultProfile": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Name of the UI profile used by normal Playwright UI actions. Empty uses Playwright defaults.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.sidebar.autoFocus": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Focus Microsoft Testing after native Run/Debug and the companion Playwright view after companion actions.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.artifacts.scanDirectories": {
+            "type": "array",
+            "items": { "type": "string" },
+            "default": ["playwright-report", "blob-report", "test-results"],
+            "markdownDescription": "Workspace-local artifact directories to scan relative to each Playwright config.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.enabled": {
@@ -336,9 +405,140 @@
         "command": "playwrightCodeLensRunner.selectConfig",
         "title": "Select CLI Config for Current File",
         "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.flakeLab",
+        "title": "Run Flake Lab",
+        "category": "Playwright",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openChangedUi",
+        "title": "Open Changed Tests in Playwright UI",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openLastFailedUi",
+        "title": "Open Last Failed Tests in Playwright UI",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.tagActions",
+        "title": "Tag Actions…",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openRunsView",
+        "title": "Open Playwright Runs",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.rerunFailedCli",
+        "title": "Rerun Failed Companion Tests",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openArtifactCenter",
+        "title": "Open Playwright Artifact Center",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openLatestReport",
+        "title": "Open Latest Playwright Report",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openLatestTrace",
+        "title": "Open Latest Playwright Trace",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.mergeBlobReports",
+        "title": "Merge Playwright Blob Reports",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openUiProfile",
+        "title": "Open Playwright UI Profile…",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.showCompanionOutput",
+        "title": "Show Playwright Companion Output",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openMicrosoftTesting",
+        "title": "Open Microsoft Playwright Testing",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openArtifact",
+        "title": "Open Playwright Artifact",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.revealArtifact",
+        "title": "Reveal Playwright Artifact",
+        "category": "Playwright"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openFailure",
+        "title": "Open Playwright Companion Failure",
+        "category": "Playwright"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "playwrightCodeLensRunner",
+          "title": "Playwright",
+          "icon": "public/playwright-sidebar.svg"
+        }
+      ]
+    },
+    "views": {
+      "playwrightCodeLensRunner": [
+        {
+          "id": "playwrightCodeLensRunner.runsView",
+          "name": "Playwright Runs"
+        },
+        {
+          "id": "playwrightCodeLensRunner.artifactsView",
+          "name": "Playwright Artifacts"
+        }
+      ]
+    },
     "menus": {
+      "view/title": [
+        {
+          "command": "playwrightCodeLensRunner.openRunsView",
+          "when": "view == playwrightCodeLensRunner.runsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.rerunFailedCli",
+          "when": "view == playwrightCodeLensRunner.runsView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.openArtifactCenter",
+          "when": "view == playwrightCodeLensRunner.artifactsView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.mergeBlobReports",
+          "when": "view == playwrightCodeLensRunner.artifactsView",
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "playwrightCodeLensRunner.revealArtifact",
+          "when": "view == playwrightCodeLensRunner.artifactsView && viewItem =~ /^playwrightArtifact\\./",
+          "group": "inline@2"
+        }
+      ],
       "explorer/context": [
         {
           "command": "playwrightCodeLensRunner.runFile",

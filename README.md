@@ -6,19 +6,19 @@
 
 Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
 
-Version 3.0 is a precision-and-scale release: configurable CodeLens actions, exact generated-case selection, discovery diagnostics, fast file-scoped discovery, and persisted ownership for overlapping configs.
+Version 3.1 adds companion Flake Lab runs and the local Playwright dashboard while retaining 3.0's configurable CodeLens actions, exact generated-case selection, discovery diagnostics, fast file-scoped discovery, and persisted ownership for overlapping configs.
 
 Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
 
 ## CodeLens at a glance
 
 ```text
-Run File · Debug File · Playwright UI · CLI Config: playwright.config.ts
+Run File · Debug File · Playwright UI · CLI Config: playwright.config.ts · More…
 
-Run Suite · Debug Suite · Inspect Suite · Playwright UI
+Run Suite · Debug Suite · Inspect Suite · Playwright UI · More…
 test.describe('checkout', () => {
 
-  Run Test · Debug Test · Inspect Test · Playwright UI
+  Run Test · Debug Test · Inspect Test · Playwright UI · More…
   test('submits an order', async ({ page }) => {
 ```
 
@@ -46,6 +46,31 @@ Loop-generated tests remain one declaration. Microsoft Testing Run/Debug and the
 | Run / Debug | Microsoft Playwright extension | VS Code Testing, gutter, output, duration, and debugger |
 | Inspect | Playwright CodeLens Runner | Playwright Inspector and an integrated terminal |
 | Playwright UI | Playwright CodeLens Runner | Playwright UI and an integrated terminal |
+
+## Flake Lab and companion dashboard
+
+**Flake Lab** is a companion CLI run for the current file, suite, test, or generated-case declaration. It deliberately does not create a native VS Code test run. By default it uses `--repeat-each 10`, `--workers 1`, `--retries 1`, `--trace on`, and `--fail-on-flaky-tests`; the last flag requires Playwright Test 1.52 or later. The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, provides **Rerun Failed**, and links back to Microsoft Testing for native results.
+
+The companion’s **More…** menu also provides changed and last-failed Playwright UI launches, discovered-tag actions, UI profiles, and Artifact Center. **Open Changed Tests in Playwright UI** uses `--only-changed` for uncommitted changes by default or a supplied Git ref; **Open Last Failed Tests in Playwright UI** uses Playwright’s persisted last-run data. These are target-scoped: they preserve the resolved config and selected companion projects without adding the current test title filter.
+
+Tag actions use discovered `@tags` and structured `--grep @tag` arguments for UI, Inspector, and copied terminal commands. UI and Inspector terminals are reused per resolved target (and UI profile) to avoid duplicate long-lived sessions.
+
+### Artifacts and remote UI
+
+The **Playwright Artifacts** view scans only configured target directories and the local `playwright-report`, `blob-report`, and `test-results` roots by default. It ranks HTML reports, report ZIPs, traces, blob-report ZIPs, and test-result attachments newest-first. Open or reveal artifacts from the view, merge blob reports with `playwright merge-reports --reporter html`, and reopen the generated report.
+
+Remote UI profiles add `--ui-host` and `--ui-port` safely as CLI arguments:
+
+```json
+{
+  "playwrightCodeLensRunner.ui.profiles": [
+    { "name": "Codespaces", "host": "0.0.0.0", "port": 8080 }
+  ],
+  "playwrightCodeLensRunner.ui.defaultProfile": "Codespaces"
+}
+```
+
+Non-loopback profiles display a network-exposure warning before launch. The extension focuses its companion view after companion actions and Microsoft Testing after native Run/Debug by default; set `playwrightCodeLensRunner.sidebar.autoFocus` to `false` to opt out. View placement remains entirely under VS Code and user control.
 
 Run and Debug delegate to VS Code Testing, so editor actions update the same Microsoft-owned test results as the Testing view. Inspector and UI intentionally remain standalone CLI sessions and do not create duplicate native test runs.
 
@@ -129,6 +154,11 @@ Open the Command Palette and search for **Playwright**:
 - **Show Playwright Discovery Details** / **Retry Playwright Discovery**
 - **Select CLI Config for Current File** — run this from Command Palette (`Cmd+Shift+P`) to choose and remember the companion CLI config for the active file
 - **Rerun Last Run**
+- **Run Flake Lab** / **Rerun Failed Companion Tests**
+- **Open Changed Tests in Playwright UI** / **Open Last Failed Tests in Playwright UI**
+- **Tag Actions…** / **Open Playwright UI Profile…**
+- **Open Playwright Runs** / **Open Playwright Artifact Center**
+- **Open Latest Playwright Report** / **Open Latest Playwright Trace** / **Merge Playwright Blob Reports**
 - **Show HTML Report** / **Show Trace**
 - **Record New Test (Codegen)**
 
@@ -138,7 +168,7 @@ Discovery Details and Retry preserve file scope only when the active document ma
 
 ## Settings
 
-All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 3.0 continues the clean break from earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers: they are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
+All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 3.1 continues the clean break from earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers: they are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
@@ -149,6 +179,15 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 | `playwrightCodeLensRunner.runOptions` | Extra Inspector and Playwright UI options | `[]` |
 | `playwrightCodeLensRunner.inspector.browser` | Inspector browser/project override | `config` |
 | `playwrightCodeLensRunner.environment` | Environment for discovery and CLI processes | `{}` |
+| `playwrightCodeLensRunner.flakeLab.repeatEach` | Repetitions for companion Flake Lab runs | `10` |
+| `playwrightCodeLensRunner.flakeLab.workers` | Workers for companion Flake Lab runs | `1` |
+| `playwrightCodeLensRunner.flakeLab.retries` | Flake Lab retry count (`0`–`5`) | `1` |
+| `playwrightCodeLensRunner.flakeLab.trace` | Trace mode for Flake Lab | `on` |
+| `playwrightCodeLensRunner.flakeLab.failOnFlakyTests` | Fail a Flake Lab run when a retry recovers | `true` |
+| `playwrightCodeLensRunner.ui.profiles` | Named remote UI host/port profiles | `[]` |
+| `playwrightCodeLensRunner.ui.defaultProfile` | Profile used for normal UI actions | empty |
+| `playwrightCodeLensRunner.sidebar.autoFocus` | Focus the action owner’s view | `true` |
+| `playwrightCodeLensRunner.artifacts.scanDirectories` | Local artifact roots per target | `playwright-report`, `blob-report`, `test-results` |
 | `playwrightCodeLensRunner.codeLens.enabled` | Enable editor actions | `true` |
 | `playwrightCodeLensRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
 | `playwrightCodeLensRunner.codeLens.layout` | `full`, `compact`, or `custom` CodeLens layout | `full` |

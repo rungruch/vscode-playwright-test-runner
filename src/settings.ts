@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { UiProfile } from './core/companionTypes';
+import { normalizeUiProfiles } from './core/uiProfiles';
 import { InspectorBrowser, isInspectorBrowser } from './core/inspectorBrowser';
 
 /** Public configuration namespace for the extension. */
@@ -14,9 +16,9 @@ const ACTIONS_BY_KIND: Record<'file' | 'suite' | 'test', readonly CodeLensAction
   suite: ['run', 'debug', 'inspect', 'ui', 'more'],
   test: ['run', 'debug', 'inspect', 'ui', 'cases', 'more'],
 };
-const FULL_FILE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'ui', 'config'];
-const FULL_SUITE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui'];
-const FULL_TEST_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'cases'];
+const FULL_FILE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'ui', 'config', 'more'];
+const FULL_SUITE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'more'];
+const FULL_TEST_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'cases', 'more'];
 const COMPACT_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'more'];
 
 /**
@@ -65,6 +67,50 @@ export class Settings {
     return this.configuration().get<Record<string, string>>('environment', {});
   }
 
+  get flakeLabRepeatEach(): number {
+    return positiveInteger(this.configuration().get<number>('flakeLab.repeatEach', 10), 10);
+  }
+
+  get flakeLabWorkers(): number {
+    return positiveInteger(this.configuration().get<number>('flakeLab.workers', 1), 1);
+  }
+
+  get flakeLabRetries(): number {
+    return clampInteger(this.configuration().get<number>('flakeLab.retries', 1), 0, 5, 1);
+  }
+
+  get flakeLabTrace(): string {
+    const trace = this.configuration().get<string>('flakeLab.trace', 'on');
+    return ['on', 'off', 'retain-on-failure', 'on-first-retry', 'on-all-retries'].includes(trace) ? trace : 'on';
+  }
+
+  get flakeLabFailOnFlakyTests(): boolean {
+    return this.configuration().get<boolean>('flakeLab.failOnFlakyTests', true);
+  }
+
+  get uiProfiles(): UiProfile[] {
+    return normalizeUiProfiles(this.configuration().get<unknown>('ui.profiles', []));
+  }
+
+  get uiDefaultProfile(): string | undefined {
+    const value = this.configuration().get<string>('ui.defaultProfile', '').trim();
+    return value || undefined;
+  }
+
+  get sidebarAutoFocus(): boolean {
+    return this.configuration().get<boolean>('sidebar.autoFocus', true);
+  }
+
+  get artifactScanDirectories(): string[] {
+    const directories = this.configuration().get<unknown>('artifacts.scanDirectories', [
+      'playwright-report', 'blob-report', 'test-results',
+    ]);
+    if (!Array.isArray(directories)) {
+      return ['playwright-report', 'blob-report', 'test-results'];
+    }
+    return directories.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+  }
+
   get codeLensEnabled(): boolean {
     return this.configuration().get<boolean>('codeLens.enabled', true);
   }
@@ -103,4 +149,12 @@ function isCodeLensAction(value: string): value is CodeLensAction {
     || value === 'config'
     || value === 'cases'
     || value === 'more';
+}
+
+function positiveInteger(value: number, fallback: number): number {
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function clampInteger(value: number, minimum: number, maximum: number, fallback: number): number {
+  return Number.isInteger(value) && value >= minimum && value <= maximum ? value : fallback;
 }

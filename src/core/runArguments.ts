@@ -18,6 +18,18 @@ export interface UiArgumentOptions {
   cwd: string;
   projects?: string[];
   extraOptions?: string[];
+  /** Named UI profile host; supplied only for explicitly selected profiles. */
+  uiHost?: string;
+  /** Named UI profile port; supplied only for explicitly selected profiles. */
+  uiPort?: number;
+}
+
+export interface FlakeLabOptions extends UiArgumentOptions {
+  repeatEach: number;
+  workers: number;
+  retries: number;
+  trace: string;
+  failOnFlakyTests: boolean;
 }
 
 export function escapeRegExp(input: string): string {
@@ -61,12 +73,88 @@ export function buildDiscoveryArguments(options: { configFile?: string; cwd?: st
 
 /** Arguments for launching Playwright's interactive UI, optionally scoped. */
 export function buildUiArguments(selection: RunSelection, options: UiArgumentOptions): string[] {
-  return buildInteractiveArguments('--ui', selection, options);
+  const args = buildInteractiveArguments('--ui', selection, options);
+  if (options.uiHost) {
+    args.push('--ui-host', options.uiHost);
+  }
+  if (options.uiPort !== undefined) {
+    args.push('--ui-port', String(options.uiPort));
+  }
+  return args;
 }
 
 /** Arguments for launching a scoped test in Playwright Inspector. */
 export function buildDebugArguments(selection: RunSelection, options: UiArgumentOptions): string[] {
   return buildInteractiveArguments('--debug', selection, options);
+}
+
+/** Arguments for an isolated, JSON-reported companion Flake Lab run. */
+export function buildFlakeLabArguments(selection: RunSelection, options: FlakeLabOptions): string[] {
+  const args = buildCompanionTestArguments(selection, options);
+  args.push(
+    '--repeat-each', String(options.repeatEach),
+    '--workers', String(options.workers),
+    '--retries', String(options.retries),
+    '--trace', options.trace,
+  );
+  if (options.failOnFlakyTests) {
+    args.push('--fail-on-flaky-tests');
+  }
+  for (const extra of options.extraOptions ?? []) {
+    if (extra) {
+      args.push(extra);
+    }
+  }
+  return args;
+}
+
+/** Structured non-interactive test arguments used by companion CLI runs. */
+export function buildCompanionTestArguments(selection: RunSelection, options: UiArgumentOptions): string[] {
+  const args = ['test'];
+  if (options.configFile) {
+    args.push('--config', options.configFile);
+  }
+  for (const file of selection.files) {
+    const filter = playwrightFileFilter(file, options.cwd);
+    args.push(selection.line ? `${filter}:${selection.line}` : filter);
+  }
+  for (const project of options.projects ?? []) {
+    if (project) {
+      args.push('--project', project);
+    }
+  }
+  if (selection.titleFilters.length > 0) {
+    args.push('--grep', combineFilters(selection.titleFilters));
+  }
+  return args;
+}
+
+/** Target-scoped UI mode for uncommitted changes or a Git comparison ref. */
+export function buildChangedUiArguments(options: UiArgumentOptions, ref?: string): string[] {
+  const args = buildUiArguments({ files: [], titleFilters: [] }, options);
+  args.push('--only-changed');
+  if (ref) {
+    args.push(ref);
+  }
+  return args;
+}
+
+/** Target-scoped UI mode using Playwright's persisted last-run data. */
+export function buildLastFailedUiArguments(options: UiArgumentOptions): string[] {
+  const args = buildUiArguments({ files: [], titleFilters: [] }, options);
+  args.push('--last-failed');
+  return args;
+}
+
+/** Tag grep is intentionally a single validated argv token, never shell text. */
+export function buildTagArguments(
+  mode: 'ui' | 'debug',
+  tag: string,
+  options: UiArgumentOptions,
+): string[] {
+  return mode === 'ui'
+    ? buildUiArguments({ files: [], titleFilters: [tag] }, options)
+    : buildDebugArguments({ files: [], titleFilters: [tag] }, options);
 }
 
 function buildInteractiveArguments(

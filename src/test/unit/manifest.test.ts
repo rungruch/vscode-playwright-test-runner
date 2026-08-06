@@ -19,6 +19,8 @@ interface Manifest {
     }>;
     commands?: Array<{ command: string }>;
     menus?: Record<string, Array<{ command: string }>>;
+    viewsContainers?: { activitybar?: Array<{ id: string; title: string; icon?: string }> };
+    views?: Record<string, Array<{ id: string; name: string }>>;
   };
 }
 
@@ -40,8 +42,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 3.0.1 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '3.0.1');
+  test('declares the 3.1.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '3.1.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
@@ -91,6 +93,53 @@ suite('extension manifest', () => {
     ]) {
       assert.ok(commands.has(command), `${command} is contributed`);
     }
+  });
+
+  test('contributes companion Flake Lab, dashboard, artifact, tag, and UI-profile commands', () => {
+    const commands = new Set((manifest.contributes?.commands ?? []).map((entry) => entry.command));
+    for (const command of [
+      'playwrightCodeLensRunner.flakeLab',
+      'playwrightCodeLensRunner.openChangedUi',
+      'playwrightCodeLensRunner.openLastFailedUi',
+      'playwrightCodeLensRunner.tagActions',
+      'playwrightCodeLensRunner.openRunsView',
+      'playwrightCodeLensRunner.rerunFailedCli',
+      'playwrightCodeLensRunner.openArtifactCenter',
+      'playwrightCodeLensRunner.openLatestReport',
+      'playwrightCodeLensRunner.openLatestTrace',
+      'playwrightCodeLensRunner.mergeBlobReports',
+      'playwrightCodeLensRunner.openUiProfile',
+    ]) {
+      assert.ok(commands.has(command), `${command} is contributed`);
+    }
+  });
+
+  test('contributes companion defaults and the Playwright Activity Bar views', () => {
+    const properties = manifest.contributes?.configuration?.[0].properties ?? {};
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.repeatEach']?.default, 10);
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.workers']?.default, 1);
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.retries']?.default, 1);
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.trace']?.default, 'on');
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.failOnFlakyTests']?.default, true);
+    assert.strictEqual(properties['playwrightCodeLensRunner.sidebar.autoFocus']?.default, true);
+    assert.deepStrictEqual(properties['playwrightCodeLensRunner.artifacts.scanDirectories']?.default, [
+      'playwright-report', 'blob-report', 'test-results',
+    ]);
+    assert.deepStrictEqual(manifest.contributes?.viewsContainers?.activitybar?.map((container) => ({
+      id: container.id,
+      title: container.title,
+      icon: container.icon,
+    })), [
+      {
+        id: 'playwrightCodeLensRunner',
+        title: 'Playwright',
+        icon: 'public/playwright-sidebar.svg',
+      },
+    ]);
+    assert.deepStrictEqual(
+      manifest.contributes?.views?.playwrightCodeLensRunner?.map((view) => view.id),
+      ['playwrightCodeLensRunner.runsView', 'playwrightCodeLensRunner.artifactsView'],
+    );
   });
 
   test('every contributed setting uses the playwrightCodeLensRunner namespace', () => {

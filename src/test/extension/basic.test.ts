@@ -122,9 +122,9 @@ suite('Playwright CodeLens Runner extension', () => {
     try {
       await configuration.update('codeLens.layout', 'full', vscode.ConfigurationTarget.Global);
       assertLayout(await codeLenses(uri), {
-        file: ['debugFile', 'openUi', 'runFile', 'selectConfig'],
-        suite: ['debugTest', 'inspectTest', 'openUi', 'runTest'],
-        test: ['debugTest', 'inspectTest', 'openUi', 'runTest'],
+        file: ['debugFile', 'more', 'openUi', 'runFile', 'selectConfig'],
+        suite: ['debugTest', 'inspectTest', 'more', 'openUi', 'runTest'],
+        test: ['debugTest', 'inspectTest', 'more', 'openUi', 'runTest'],
       });
 
       await configuration.update('codeLens.layout', 'compact', vscode.ConfigurationTarget.Global);
@@ -206,6 +206,7 @@ suite('Playwright CodeLens Runner extension', () => {
   });
 
   test('a CodeLens run is executed exactly once by the Microsoft extension', async () => {
+    const restoreAutoFocus = await disableAutoFocus(fixture.uri);
     const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
     try {
       await vscode.workspace.fs.delete(marker);
@@ -213,22 +214,27 @@ suite('Playwright CodeLens Runner extension', () => {
       // The first run has no marker yet.
     }
 
-    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'delegation.spec.ts');
-    const document = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(document, { preview: false });
-    await api.discovery.refreshAll();
-    await vscode.commands.executeCommand('testing.refreshTests');
+    try {
+      const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'delegation.spec.ts');
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, { preview: false });
+      await api.discovery.refreshAll();
+      await vscode.commands.executeCommand('testing.refreshTests');
 
-    const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
-    const runLens = (lenses ?? []).find((lens) => lens.command?.title === '$(play) Run Test');
-    assert.ok(runLens?.command, 'test Run CodeLens is available');
+      const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
+      const runLens = (lenses ?? []).find((lens) => lens.command?.title === '$(play) Run Test');
+      assert.ok(runLens?.command, 'test Run CodeLens is available');
 
-    await vscode.commands.executeCommand(runLens.command.command, ...(runLens.command.arguments ?? []));
-    const lines = await waitForMarker(marker);
-    assert.deepStrictEqual(lines, ['run'], 'only the official TestController executes the selected test');
+      await vscode.commands.executeCommand(runLens.command.command, ...(runLens.command.arguments ?? []));
+      const lines = await waitForMarker(marker);
+      assert.deepStrictEqual(lines, ['run'], 'only the official TestController executes the selected test');
+    } finally {
+      await restoreAutoFocus();
+    }
   });
 
   test('file Run delegates by URI without companion CLI discovery', async () => {
+    const restoreAutoFocus = await disableAutoFocus(fixture.uri);
     const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
     try {
       await vscode.workspace.fs.delete(marker);
@@ -250,6 +256,7 @@ suite('Playwright CodeLens Runner extension', () => {
       assert.deepStrictEqual(await waitForMarker(marker), ['run']);
     } finally {
       api.discovery.resolveTargetForFile = originalResolve;
+      await restoreAutoFocus();
     }
     assert.strictEqual(resolutionCalled, false);
   });
@@ -463,8 +470,11 @@ suite('Playwright CodeLens Runner extension', () => {
     const uri = vscode.Uri.joinPath(fixture.uri, 'package.json');
     const document = await vscode.workspace.openTextDocument(uri);
     await vscode.window.showTextDocument(document, { preview: false });
-    const target = api.discovery.currentTargets[0] ?? (await api.discovery.refreshTargets())[0];
-    assert.ok(target, 'fixture target is available');
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', fixture.uri);
+    const previousConfigFiles = configuration.inspect<string[]>('configFiles')?.globalValue;
+    await configuration.update('configFiles', ['playwright.config.ts'], vscode.ConfigurationTarget.Global);
+    await waitUntil('one unambiguous target after constraining config files', () => api.discovery.currentTargets.length === 1);
+    const target = api.discovery.currentTargets[0];
     const model = api.discovery.cachedModel(target.id) ?? await api.discovery.discover(target);
     assert.ok(model, 'fixture discovery model is available');
 
@@ -480,7 +490,7 @@ suite('Playwright CodeLens Runner extension', () => {
     } finally {
       api.discovery.showDiagnostics = originalShowDiagnostics;
     }
-    assert.strictEqual(shownTarget, target.id, 'Details falls back to the selected config');
+    assert.strictEqual(shownTarget, target.id, 'Details falls back to the unambiguous config');
     assert.strictEqual(shownFile, undefined, 'Details does not use an unrelated document as file scope');
 
     let targetWideRetries = 0;
@@ -500,6 +510,8 @@ suite('Playwright CodeLens Runner extension', () => {
     } finally {
       api.discovery.discover = originalDiscover;
       api.discovery.discoverForFile = originalDiscoverForFile;
+      await configuration.update('configFiles', previousConfigFiles, vscode.ConfigurationTarget.Global);
+      await waitUntil('target list to restore after config constraint', () => api.discovery.currentTargets.length > 1);
     }
     assert.strictEqual(targetWideRetries, 1, 'Retry refreshes the selected config');
     assert.strictEqual(fileScopedRetries, 0, 'Retry does not refresh an unrelated document as a Playwright file');
@@ -524,6 +536,13 @@ async function waitForMarker(uri: vscode.Uri): Promise<string[]> {
     await delay(100);
   }
   assert.fail('timed out waiting for the official Playwright run marker');
+}
+
+async function disableAutoFocus(resource: vscode.Uri): Promise<() => PromiseLike<void>> {
+  const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', resource);
+  const previous = configuration.inspect<boolean>('sidebar.autoFocus')?.globalValue;
+  await configuration.update('sidebar.autoFocus', false, vscode.ConfigurationTarget.Global);
+  return () => configuration.update('sidebar.autoFocus', previous, vscode.ConfigurationTarget.Global);
 }
 
 function delay(milliseconds: number): Promise<void> {

@@ -2,6 +2,10 @@ import * as assert from 'assert';
 import {
   buildDebugArguments,
   buildDiscoveryArguments,
+  buildChangedUiArguments,
+  buildFlakeLabArguments,
+  buildLastFailedUiArguments,
+  buildTagArguments,
   buildUiArguments,
   combineFilters,
   escapeRegExp,
@@ -199,5 +203,66 @@ suite('runArguments', () => {
       'tests/dynamic\\.spec\\.ts:17',
       '--grep', 'Dynamic case.*second(?:\\s+@\\S+)*$',
     ]);
+  });
+
+  test('builds Flake Lab defaults after scoped file, project, and grep arguments', () => {
+    assert.deepStrictEqual(
+      buildFlakeLabArguments(
+        { files: ['/ws/tests/login.spec.ts'], titleFilters: ['Login flow'], line: 12 },
+        {
+          configFile: '/ws/playwright.config.ts',
+          cwd: '/ws',
+          projects: ['chromium'],
+          extraOptions: ['--headed'],
+          repeatEach: 10,
+          workers: 1,
+          retries: 1,
+          trace: 'on',
+          failOnFlakyTests: true,
+        },
+      ),
+      [
+        'test', '--config', '/ws/playwright.config.ts', 'tests/login\\.spec\\.ts:12',
+        '--project', 'chromium', '--grep', 'Login flow',
+        '--repeat-each', '10', '--workers', '1', '--retries', '1', '--trace', 'on',
+        '--fail-on-flaky-tests', '--headed',
+      ],
+    );
+  });
+
+  test('builds target-scoped changed and last-failed UI arguments', () => {
+    const options = {
+      configFile: '/ws/playwright.config.ts',
+      cwd: '/ws',
+      projects: ['chromium'],
+      uiHost: '0.0.0.0',
+      uiPort: 8080,
+    };
+    assert.deepStrictEqual(
+      buildChangedUiArguments(options, 'origin/main'),
+      [
+        'test', '--ui', '--config', '/ws/playwright.config.ts', '--project', 'chromium',
+        '--ui-host', '0.0.0.0', '--ui-port', '8080', '--only-changed', 'origin/main',
+      ],
+    );
+    assert.deepStrictEqual(
+      buildLastFailedUiArguments(options),
+      [
+        'test', '--ui', '--config', '/ws/playwright.config.ts', '--project', 'chromium',
+        '--ui-host', '0.0.0.0', '--ui-port', '8080', '--last-failed',
+      ],
+    );
+  });
+
+  test('puts a discovered tag in one structured grep token for UI and Inspector', () => {
+    const options = { cwd: '/ws', projects: ['webkit'] };
+    assert.deepStrictEqual(
+      buildTagArguments('ui', '@smoke', options),
+      ['test', '--ui', '--project', 'webkit', '--grep', '@smoke'],
+    );
+    assert.deepStrictEqual(
+      buildTagArguments('debug', '@auth-api', options),
+      ['test', '--debug', '--project', 'webkit', '--grep', '@auth-api'],
+    );
   });
 });
