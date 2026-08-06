@@ -13,6 +13,9 @@ eslint.config.mjs
 knip.json
 tsconfig.json
 node_modules/**
+test-results/**
+playwright-report/**
+blob-report/**
 **/*.map
 **/*.ts
 **/*.vsix

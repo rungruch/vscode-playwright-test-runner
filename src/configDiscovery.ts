@@ -35,7 +35,6 @@ export async function discoverRunTargets(onProgress?: (message: string) => void)
     const found = await vscode.workspace.findFiles(
       new vscode.RelativePattern(folder, CONFIG_GLOB),
       EXCLUDE_GLOB,
-      50,
     );
     if (found.length === 0) {
       targets.push(resolveRunTarget(folder, undefined, settings));

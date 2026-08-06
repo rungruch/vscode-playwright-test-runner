@@ -105,6 +105,87 @@ suite('discoveryParser', () => {
     assert.strictEqual(model.files[0].tests[0].fullTitle, 'works');
   });
 
+  test('recognizes a nested root file suite by its rootDir-relative title', () => {
+    const model = parseDiscoveryOutput(report({
+      suites: [
+        {
+          title: 'tests/nested/scoped.spec.ts',
+          file: 'tests/nested/scoped.spec.ts',
+          specs: [
+            {
+              title: 'top-level nested test',
+              id: 'nested-top',
+              file: 'tests/nested/scoped.spec.ts',
+              line: 2,
+              column: 1,
+              tests: [{ projectName: 'chromium' }],
+            },
+          ],
+          suites: [
+            {
+              title: 'nested suite',
+              file: 'tests/nested/scoped.spec.ts',
+              line: 4,
+              column: 1,
+              specs: [
+                {
+                  title: 'nested test',
+                  id: 'nested-test',
+                  file: 'tests/nested/scoped.spec.ts',
+                  line: 5,
+                  column: 3,
+                  tests: [{ projectName: 'chromium' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }), BASE);
+
+    assert.strictEqual(model.files.length, 1);
+    const file = model.files[0];
+    assert.strictEqual(file.relativeFile, 'tests/nested/scoped.spec.ts');
+    assert.deepStrictEqual(file.tests.map((test) => test.fullTitle), ['top-level nested test']);
+    assert.deepStrictEqual(file.suites.map((suite) => suite.title), ['nested suite']);
+    assert.deepStrictEqual(file.suites[0].tests.map((test) => test.fullTitle), ['nested suite nested test']);
+  });
+
+  test('does not confuse a nested describe named like the file with the root file suite', () => {
+    const model = parseDiscoveryOutput(report({
+      suites: [
+        {
+          title: 'same-name.spec.ts',
+          file: 'same-name.spec.ts',
+          suites: [
+            {
+              title: 'same-name.spec.ts',
+              file: 'same-name.spec.ts',
+              line: 3,
+              column: 1,
+              specs: [
+                {
+                  title: 'keeps its suite',
+                  id: 'same-name-test',
+                  file: 'same-name.spec.ts',
+                  line: 4,
+                  column: 3,
+                  tests: [{ projectName: 'chromium' }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }), BASE);
+
+    assert.deepStrictEqual(model.files[0].suites.map((suite) => suite.title), ['same-name.spec.ts']);
+    assert.deepStrictEqual(
+      model.files[0].suites[0].tests.map((test) => test.fullTitle),
+      ['same-name.spec.ts keeps its suite'],
+    );
+  });
+
   test('keeps duplicate titles distinct via spec ids', () => {
     const model = parseDiscoveryOutput(report({
       suites: [

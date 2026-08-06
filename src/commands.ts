@@ -41,6 +41,11 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.debugFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'debug'));
   register('playwrightCodeLensRunner.inspectTest', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'debug'));
   register('playwrightCodeLensRunner.openUi', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'ui'));
+  register('playwrightCodeLensRunner.more', (selection?: EditorTestSelection) => moreCommand(deps, selection));
+  register('playwrightCodeLensRunner.pickCase', (selection?: EditorTestSelection) => pickCaseCommand(deps, selection));
+  register('playwrightCodeLensRunner.showDiscoveryDetails', (selection?: EditorTestSelection) => showDiscoveryDetailsCommand(deps, selection));
+  register('playwrightCodeLensRunner.retryDiscovery', (selection?: EditorTestSelection) => retryDiscoveryCommand(deps, selection));
+  register('playwrightCodeLensRunner.selectConfig', (selection?: EditorTestSelection) => selectConfigCommand(deps, selection));
 
   register('playwrightCodeLensRunner.showReport', () => showReportCommand(deps));
   register('playwrightCodeLensRunner.showTrace', (uri?: vscode.Uri) => showTraceCommand(deps, uri));
@@ -73,10 +78,7 @@ async function delegatedFileCommand(
     void vscode.window.showInformationMessage('Open a Playwright test file first.');
     return;
   }
-  const selection = await fileSelectionForUri(deps, uri);
-  if (selection) {
-    await deps.bridge.run(selection, mode);
-  }
+  await deps.bridge.runUri(uri, mode);
 }
 
 async function interactiveCliCommand(
@@ -130,6 +132,133 @@ async function interactiveCliCommand(
   runInTerminal(target, `${label}: ${path.basename(selection.file)}`, args);
 }
 
+async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | undefined): Promise<void> {
+  const resolved = selection ?? await selectionAtCursor(deps);
+  if (!resolved) {
+    void vscode.window.showInformationMessage('No Playwright selection found at the current position.');
+    return;
+  }
+  const choices = [
+    { label: '$(play) Run', description: 'Microsoft Testing', action: 'run' as const },
+    { label: '$(debug) Debug', description: 'Microsoft Testing', action: 'debug' as const },
+    ...(resolved.kind === 'file' ? [] : [{ label: '$(eye) Inspect', description: 'Companion CLI', action: 'inspect' as const }]),
+    { label: '$(browser) Playwright UI', description: 'Companion CLI', action: 'ui' as const },
+    ...(resolved.kind === 'test' && (resolved.titlePaths?.length ?? 0) > 1
+      ? [{ label: `Cases (${resolved.titlePaths?.length ?? 0})…`, action: 'case' as const }]
+      : []),
+    ...(resolved.kind === 'file' ? [{ label: '$(settings-gear) Select CLI Config', action: 'config' as const }] : []),
+  ];
+  const picked = await vscode.window.showQuickPick(choices, { title: 'Playwright actions' });
+  if (!picked) {
+    return;
+  }
+  if (picked.action === 'run') {
+    await delegatedTestCommand(deps, resolved, 'run');
+  } else if (picked.action === 'debug') {
+    await delegatedTestCommand(deps, resolved, 'debug');
+  } else if (picked.action === 'inspect') {
+    await interactiveCliCommand(deps, resolved, 'debug');
+  } else if (picked.action === 'ui') {
+    await interactiveCliCommand(deps, resolved, 'ui');
+  } else if (picked.action === 'case') {
+    await pickCaseCommand(deps, resolved);
+  } else {
+    await selectConfigCommand(deps, resolved);
+  }
+}
+
+async function pickCaseCommand(deps: CommandDeps, selection: EditorTestSelection | undefined): Promise<void> {
+  const resolved = selection ?? await selectionAtCursor(deps);
+  if (!resolved || resolved.kind !== 'test' || (resolved.titlePaths?.length ?? 0) <= 1) {
+    void vscode.window.showInformationMessage('This selection has no generated cases to choose from.');
+    return;
+  }
+  const exact = await chooseExactCase(resolved);
+  if (!exact) {
+    return;
+  }
+  const action = await vscode.window.showQuickPick(
+    [
+      { label: '$(eye) Inspect exact case', mode: 'debug' as const },
+      { label: '$(browser) Open exact case in Playwright UI', mode: 'ui' as const },
+    ],
+    { title: 'Run selected generated case with' },
+  );
+  if (action) {
+    await interactiveCliCommand(deps, exact, action.mode);
+  }
+}
+
+async function chooseExactCase(selection: EditorTestSelection): Promise<EditorTestSelection | undefined> {
+  const cases = selection.titlePaths ?? [];
+  const picked = await vscode.window.showQuickPick(
+    cases.map((titlePath, index) => ({
+      label: titlePath.join(' › '),
+      description: `Case ${index + 1} of ${cases.length}`,
+      titlePath,
+    })),
+    {
+      title: `Select an exact generated case (${cases.length})`,
+      matchOnDescription: true,
+    },
+  );
+  if (!picked) {
+    return undefined;
+  }
+  return {
+    ...selection,
+    fullTitle: picked.titlePath.join(' '),
+    titlePath: picked.titlePath,
+    titlePaths: [picked.titlePath],
+  };
+}
+
+async function retryDiscoveryCommand(deps: CommandDeps, selection: EditorTestSelection | undefined): Promise<void> {
+  const scope = await targetScopeForCommand(deps, selection, 'Retry discovery for which Playwright CLI config?');
+  if (!scope) {
+    return;
+  }
+  const { target, file } = scope;
+  try {
+    const model = file
+      ? await deps.discovery.discoverForFile(target, file, undefined, true)
+      : await deps.discovery.discover(target, undefined, true);
+    if (model) {
+      void vscode.window.showInformationMessage(`Playwright discovery refreshed for ${targetLabel(target)}.`);
+      return;
+    }
+    void vscode.window.showErrorMessage(
+      deps.discovery.errorFor(target.id, file) ?? `Playwright discovery produced no tests for ${targetLabel(target)}.`,
+    );
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Playwright discovery failed: ${errorMessage(error)}`);
+  }
+}
+
+async function showDiscoveryDetailsCommand(
+  deps: CommandDeps,
+  selection: EditorTestSelection | undefined,
+): Promise<void> {
+  const scope = await targetScopeForCommand(deps, selection, 'Show discovery details for which Playwright CLI config?');
+  if (!scope) {
+    return;
+  }
+  const { target, file } = scope;
+  deps.discovery.showDiagnostics(target.id, file);
+  if (!deps.discovery.diagnosticsFor(target.id, file)) {
+    void vscode.window.showInformationMessage(`No discovery attempt has been recorded for ${targetLabel(target)} yet.`);
+  }
+}
+
+async function selectConfigCommand(deps: CommandDeps, selection: EditorTestSelection | undefined): Promise<void> {
+  const uri = selection ? vscode.Uri.parse(selection.uri) : vscode.window.activeTextEditor?.document.uri;
+  if (!uri) {
+    void vscode.window.showInformationMessage('Open a Playwright test file first.');
+    return;
+  }
+  await deps.discovery.selectTargetForFile(uri.fsPath);
+}
+
 async function showReportCommand(deps: CommandDeps): Promise<void> {
   const target = await pickTarget(deps, 'Show HTML report for which Playwright config?');
   if (target) {
@@ -150,7 +279,7 @@ async function showTraceCommand(deps: CommandDeps, uri: vscode.Uri | undefined):
   if (!zip) {
     return;
   }
-  const target = await targetForFile(deps, zip.fsPath, { silent: true })
+  const target = await deps.discovery.nearestTargetForPath(zip.fsPath)
     ?? await pickTarget(deps, 'Show trace with which Playwright config?');
   if (target) {
     runInTerminal(target, 'Playwright Trace', ['show-trace', zip.fsPath]);
@@ -159,7 +288,7 @@ async function showTraceCommand(deps: CommandDeps, uri: vscode.Uri | undefined):
 
 async function recordTestCommand(deps: CommandDeps, folder: vscode.Uri | undefined): Promise<void> {
   const target = folder
-    ? await targetForFile(deps, folder.fsPath, { silent: true }) ?? await pickTarget(deps)
+    ? await deps.discovery.nearestTargetForPath(folder.fsPath) ?? await pickTarget(deps)
     : await pickTarget(deps);
   if (!target) {
     return;
@@ -250,6 +379,35 @@ async function targetForSelection(deps: CommandDeps, selection: EditorTestSelect
     ?? targetForFile(deps, selection.file);
 }
 
+async function targetScopeForCommand(
+  deps: CommandDeps,
+  selection: EditorTestSelection | undefined,
+  title: string,
+): Promise<{ target: RunTarget; file?: string } | undefined> {
+  if (isEditorSelection(selection)) {
+    const target = await targetForSelection(deps, selection);
+    return target ? { target, file: selection.file } : undefined;
+  }
+  const activeDocument = vscode.window.activeTextEditor?.document;
+  if (activeDocument && isConfiguredPlaywrightDocument(activeDocument)) {
+    const activeUri = activeDocument.uri;
+    const target = await targetForFile(deps, activeUri.fsPath, { silent: true });
+    if (target) {
+      return { target, file: activeUri.fsPath };
+    }
+  }
+  const target = await pickTarget(deps, title);
+  return target ? { target } : undefined;
+}
+
+function isConfiguredPlaywrightDocument(document: vscode.TextDocument): boolean {
+  return document.uri.scheme === 'file'
+    && vscode.languages.match(
+      { scheme: 'file', pattern: new Settings(document.uri).codeLensPattern },
+      document,
+    ) > 0;
+}
+
 async function pickTarget(deps: CommandDeps, title = 'Select a Playwright config'): Promise<RunTarget | undefined> {
   const targets = deps.discovery.currentTargets.length > 0
     ? deps.discovery.currentTargets
@@ -273,22 +431,11 @@ async function targetForFile(
   fsPath: string,
   options: { silent?: boolean } = {},
 ): Promise<RunTarget | undefined> {
-  const targets = deps.discovery.currentTargets.length > 0
-    ? deps.discovery.currentTargets
-    : await deps.discovery.refreshTargets();
-  const best = targets
-    .filter((target) => containsPath(target.configDir, fsPath))
-    .sort((a, b) => b.configDir.length - a.configDir.length)[0]
-    ?? targets[0];
+  const best = await deps.discovery.resolveTargetForFile(fsPath);
   if (!best && !options.silent) {
     void vscode.window.showInformationMessage('No Playwright configs found in this workspace.');
   }
   return best;
-}
-
-function containsPath(directory: string, candidate: string): boolean {
-  const relative = path.relative(directory, candidate);
-  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
 function isEditorSelection(value: EditorTestSelection | vscode.Uri | undefined): value is EditorTestSelection {
@@ -303,4 +450,8 @@ function isEditorSelection(value: EditorTestSelection | vscode.Uri | undefined):
 
 function isUri(value: EditorTestSelection | vscode.Uri | undefined): value is vscode.Uri {
   return Boolean(value && typeof value === 'object' && 'scheme' in value && 'fsPath' in value);
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -10,7 +10,12 @@ interface Manifest {
   activationEvents?: string[];
   contributes?: {
     configuration?: Array<{
-      properties?: Record<string, { default?: unknown; enum?: unknown[] }>;
+      properties?: Record<string, {
+        default?: unknown;
+        enum?: unknown[];
+        uniqueItems?: boolean;
+        items?: { enum?: unknown[] };
+      }>;
     }>;
     commands?: Array<{ command: string }>;
     menus?: Record<string, Array<{ command: string }>>;
@@ -31,8 +36,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 2.1 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '2.1.0');
+  test('declares the 3.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '3.0.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
@@ -41,6 +46,47 @@ suite('extension manifest', () => {
     const setting = manifest.contributes?.configuration?.[0].properties?.['playwrightCodeLensRunner.inspector.browser'];
     assert.strictEqual(setting?.default, 'config');
     assert.deepStrictEqual(setting?.enum, ['config', 'chromium', 'firefox', 'webkit']);
+  });
+
+  test('contributes validated full, compact, and custom CodeLens settings', () => {
+    const properties = manifest.contributes?.configuration?.[0].properties ?? {};
+    const layout = properties['playwrightCodeLensRunner.codeLens.layout'];
+    assert.strictEqual(layout?.default, 'full');
+    assert.deepStrictEqual(layout?.enum, ['full', 'compact', 'custom']);
+
+    const expected = {
+      fileActions: {
+        allowed: ['run', 'debug', 'ui', 'config', 'more'],
+        defaults: ['run', 'debug', 'ui', 'config'],
+      },
+      suiteActions: {
+        allowed: ['run', 'debug', 'inspect', 'ui', 'more'],
+        defaults: ['run', 'debug', 'inspect', 'ui'],
+      },
+      testActions: {
+        allowed: ['run', 'debug', 'inspect', 'ui', 'cases', 'more'],
+        defaults: ['run', 'debug', 'inspect', 'ui', 'cases'],
+      },
+    } as const;
+    for (const [name, values] of Object.entries(expected)) {
+      const setting = properties[`playwrightCodeLensRunner.codeLens.${name}`];
+      assert.strictEqual(setting?.uniqueItems, true, `${name} rejects duplicate actions`);
+      assert.deepStrictEqual(setting?.items?.enum, values.allowed, `${name} allowed actions`);
+      assert.deepStrictEqual(setting?.default, values.defaults, `${name} defaults`);
+    }
+  });
+
+  test('contributes the 3.0 workbench and discovery commands', () => {
+    const commands = new Set((manifest.contributes?.commands ?? []).map((entry) => entry.command));
+    for (const command of [
+      'playwrightCodeLensRunner.more',
+      'playwrightCodeLensRunner.pickCase',
+      'playwrightCodeLensRunner.showDiscoveryDetails',
+      'playwrightCodeLensRunner.retryDiscovery',
+      'playwrightCodeLensRunner.selectConfig',
+    ]) {
+      assert.ok(commands.has(command), `${command} is contributed`);
+    }
   });
 
   test('every contributed setting uses the playwrightCodeLensRunner namespace', () => {
@@ -80,5 +126,13 @@ suite('extension manifest', () => {
     assert.ok(!serialized.includes('playwrightrunner'));
     assert.ok(!serialized.includes('migrateSettings'));
     assert.ok(!manifest.contributes?.commands?.some((entry) => entry.command.startsWith('playwright.')));
+  });
+
+  test('excludes generated Playwright results from the VSIX', () => {
+    const vscodeIgnore = fs.readFileSync(path.resolve(process.cwd(), '.vscodeignore'), 'utf8');
+    const entries = vscodeIgnore.split(/\r?\n/);
+    for (const generated of ['test-results/**', 'playwright-report/**', 'blob-report/**']) {
+      assert.ok(entries.includes(generated), `${generated} must not leak into the packaged extension`);
+    }
   });
 });

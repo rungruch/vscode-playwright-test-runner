@@ -6,12 +6,14 @@
 
 Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
 
+Version 3.0 is a precision-and-scale release: configurable CodeLens actions, exact generated-case selection, discovery diagnostics, fast file-scoped discovery, and persisted ownership for overlapping configs.
+
 Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
 
 ## CodeLens at a glance
 
 ```text
-Run File · Debug File · Playwright UI
+Run File · Debug File · Playwright UI · CLI Config: playwright.config.ts
 
 Run Suite · Debug Suite · Inspect Suite · Playwright UI
 test.describe('checkout', () => {
@@ -19,6 +21,25 @@ test.describe('checkout', () => {
   Run Test · Debug Test · Inspect Test · Playwright UI
   test('submits an order', async ({ page }) => {
 ```
+
+The CodeLens workbench supports three layouts:
+
+- `full` keeps the complete action sets. Files also show the resolved **CLI Config**, and generated tests show **Cases (N)…**.
+- `compact` shows `Run · Debug · More…`; CLI config selection, Inspector/UI, and generated cases remain available inside **More…**.
+- `custom` uses separate `codeLens.fileActions`, `codeLens.suiteActions`, and `codeLens.testActions` arrays. The file-only `config` action and generated-test-only `cases` action are configurable too.
+
+For example:
+
+```json
+{
+  "playwrightCodeLensRunner.codeLens.layout": "custom",
+  "playwrightCodeLensRunner.codeLens.fileActions": ["run", "debug", "config", "more"],
+  "playwrightCodeLensRunner.codeLens.suiteActions": ["run", "inspect", "ui"],
+  "playwrightCodeLensRunner.codeLens.testActions": ["run", "debug", "inspect", "cases", "more"]
+}
+```
+
+Loop-generated tests remain one declaration. Microsoft Testing Run/Debug and the declaration's direct Inspector/UI actions target all generated cases at that source line. **Cases (N)…** lets you choose one exact case for Inspector or UI, combining the declaration line with file- and title-boundary-aware filtering.
 
 | Action | Execution owner | Result location |
 | --- | --- | --- |
@@ -35,7 +56,10 @@ Run and Debug delegate to VS Code Testing, so editor actions update the same Mic
 - Keep Microsoft as the sole `TestController`, avoiding duplicate execution and competing results.
 - Discover nested suites, top-level tests, duplicate titles, and data-driven cases through Playwright itself.
 - Collapse loop-generated cases at one source declaration into one CodeLens group.
-- Work across multiple configs, workspace roots, and nested monorepo packages.
+- Select one exact generated case for Inspector or Playwright UI without changing native Run/Debug scope.
+- Work across multiple configs, workspace roots, cross-root `testDir` ownership, and nested monorepo packages.
+- Show discovery failures in the editor with Details, Retry, and CLI-config recovery actions.
+- Resolve overlapping CLI config ownership without interrupting CodeLens calculation, remember explicit choices per file, and display the active CLI config in the file lens.
 - Preserve config, working directory, environment, extra options, and paths containing spaces.
 - Choose companion CLI projects independently from Microsoft's private project selection.
 
@@ -56,6 +80,10 @@ Run and Debug delegate to VS Code Testing, so editor actions update the same Mic
 5. Optionally run **Playwright: Configure CLI Projects** for Inspector and Playwright UI.
 
 Standard `playwright.config.{js,cjs,mjs,ts,cts,mts}` files are discovered automatically. Explicit configs, custom test patterns, configless workspaces, multi-root workspaces, and nested monorepos are also supported.
+
+Companion discovery, Inspector, and UI use cwd-relative paths when possible, otherwise absolute paths, then forward-slash-normalize and regex-escape Playwright's positional file filter. This keeps every CLI action reliable for filenames containing spaces or regular-expression metacharacters and for Windows-style paths.
+
+Suite and test Inspector/UI actions combine that file filter with the declaration's source line and an exact title-path filter. The line scope distinguishes title paths that Playwright flattens to the same text, while the title filter accepts project prefixes, nested-file paths, separators, and inherited tags.
 
 ## Inspector browser
 
@@ -82,6 +110,10 @@ Microsoft's enabled configs and projects are private to the official extension a
 
 **Configure CLI Projects** stores a separate project selection for Inspector and Playwright UI. This separation is intentional: changing companion CLI projects cannot silently alter the official Testing view.
 
+The **CLI Config** file lens is also companion-only. CodeLens resolves ownership noninteractively: it revalidates a remembered choice, otherwise selects a deterministic config whose Playwright discovery owns the file. Use **Select CLI Config for File** to choose another overlapping config and remember it for that file. Configs may own sibling directories or tests in another workspace root; they do not need to be ancestors of the test file.
+
+Saved and externally changed test/config files invalidate affected discovery caches. Known persisted or discovered owners are refreshed together, so cross-root and sibling layouts do not go stale after generators, Git operations, or edits outside VS Code.
+
 ## Commands
 
 Open the Command Palette and search for **Playwright**:
@@ -93,15 +125,20 @@ Open the Command Palette and search for **Playwright**:
 - **Run All Tests in File** / **Debug All Tests in File**
 - **Run Test with Playwright Inspector**
 - **Open in Playwright UI**
+- **More Playwright Actions…** / **Pick an Exact Generated Case**
+- **Show Playwright Discovery Details** / **Retry Playwright Discovery**
+- **Select CLI Config for File**
 - **Rerun Last Run**
 - **Show HTML Report** / **Show Trace**
 - **Record New Test (Codegen)**
 
 Refresh and Rerun delegate to VS Code Testing. Report, trace, codegen, Inspector, and UI use the resolved workspace Playwright CLI.
 
+Discovery Details and Retry preserve file scope only when the active document matches `playwrightCodeLensRunner.codeLens.pattern`; otherwise they ask for a CLI config. Diagnostics include scope, config, working directory, CLI version, projects, duration, and a shell-quoted command preview; sensitive option values and configured environment values are redacted.
+
 ## Settings
 
-All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 2.1 is a clean break: earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
+All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 3.0 continues the clean break from earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers: they are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
@@ -114,6 +151,10 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 | `playwrightCodeLensRunner.environment` | Environment for discovery and CLI processes | `{}` |
 | `playwrightCodeLensRunner.codeLens.enabled` | Enable editor actions | `true` |
 | `playwrightCodeLensRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
+| `playwrightCodeLensRunner.codeLens.layout` | `full`, `compact`, or `custom` CodeLens layout | `full` |
+| `playwrightCodeLensRunner.codeLens.fileActions` | Custom file actions: `run`, `debug`, `ui`, `config`, `more` | `run`, `debug`, `ui`, `config` |
+| `playwrightCodeLensRunner.codeLens.suiteActions` | Custom actions for suite lenses | `run`, `debug`, `inspect`, `ui` |
+| `playwrightCodeLensRunner.codeLens.testActions` | Custom test actions, including generated-only `cases` | `run`, `debug`, `inspect`, `ui`, `cases` |
 
 Paths and environment values support `${workspaceFolder}`, `${packageRoot}`, and `${configDir}`. These companion settings do not override Microsoft's native Run/Debug configuration.
 
@@ -161,7 +202,7 @@ Extension-host tests install `ms-playwright.playwright@1.1.19` and run against b
 | Full basic fixture | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/basic` (Playwright `1.62.1`) |
 | Full basic fixture | Current stable VS Code `1.132.0` | `fixtures/basic` (Playwright `1.62.1`) |
 | Playwright compatibility smoke | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/pw138` (Playwright `1.38.0`) |
-| Multi-root nested discovery | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/multipkg` (Playwright `1.62.1`) |
+| Multi-root ownership and discovery | Earliest tested VS Code 1.125 patch (`1.125.1`) | `fixtures/multipkg` with overlapping, sibling-`testDir`, and cross-root configs (Playwright `1.62.1`) |
 
 Playwright `1.38.0` remains the supported minimum despite newer maintained fixtures. The official Playwright extension remains pinned at its latest published release, `1.1.19`, in these tests.
 

@@ -1,5 +1,7 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import { EditorTestSelection } from '../../core/editorSelections';
+import { cliSelectionForEditor } from '../../core/selectionArguments';
 import type { ExtensionApi } from '../../extension';
 
 suite('Playwright CodeLens Runner extension', () => {
@@ -34,11 +36,20 @@ suite('Playwright CodeLens Runner extension', () => {
 
   test('registers the CodeLens companion commands', async () => {
     const commands = new Set(await vscode.commands.getCommands(true));
-    assert.ok(commands.has('playwrightCodeLensRunner.runTest'));
-    assert.ok(commands.has('playwrightCodeLensRunner.debugTest'));
-    assert.ok(commands.has('playwrightCodeLensRunner.inspectTest'));
-    assert.ok(commands.has('playwrightCodeLensRunner.openUi'));
-    assert.ok(commands.has('playwrightCodeLensRunner.openOfficialSettings'));
+    for (const command of [
+      'playwrightCodeLensRunner.runTest',
+      'playwrightCodeLensRunner.debugTest',
+      'playwrightCodeLensRunner.inspectTest',
+      'playwrightCodeLensRunner.openUi',
+      'playwrightCodeLensRunner.openOfficialSettings',
+      'playwrightCodeLensRunner.more',
+      'playwrightCodeLensRunner.pickCase',
+      'playwrightCodeLensRunner.showDiscoveryDetails',
+      'playwrightCodeLensRunner.retryDiscovery',
+      'playwrightCodeLensRunner.selectConfig',
+    ]) {
+      assert.ok(commands.has(command), `${command} is registered`);
+    }
     assert.ok(!commands.has('playwrightCodeLensRunner.importJsonReport'));
     assert.ok(!commands.has('playwrightCodeLensRunner.updateSnapshots'));
   });
@@ -70,6 +81,53 @@ suite('Playwright CodeLens Runner extension', () => {
     assert.ok(titles.has('$(eye) Inspect Suite'));
     assert.ok(titles.has('$(play) Run Test'));
     assert.ok(titles.has('$(eye) Inspect Test'));
+    assert.ok([...titles].some((title) => title?.startsWith('$(settings-gear) CLI Config: ')));
+  });
+
+  test('provides full, compact, and custom CodeLens layouts', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'example.spec.ts');
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: false });
+    await api.discovery.refreshAll();
+
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', uri);
+    const keys = [
+      'codeLens.layout',
+      'codeLens.fileActions',
+      'codeLens.suiteActions',
+      'codeLens.testActions',
+    ] as const;
+    const previous = new Map(keys.map((key) => [key, configuration.inspect(key)?.globalValue]));
+
+    try {
+      await configuration.update('codeLens.layout', 'full', vscode.ConfigurationTarget.Global);
+      assertLayout(await codeLenses(uri), {
+        file: ['debugFile', 'openUi', 'runFile', 'selectConfig'],
+        suite: ['debugTest', 'inspectTest', 'openUi', 'runTest'],
+        test: ['debugTest', 'inspectTest', 'openUi', 'runTest'],
+      });
+
+      await configuration.update('codeLens.layout', 'compact', vscode.ConfigurationTarget.Global);
+      assertLayout(await codeLenses(uri), {
+        file: ['debugFile', 'more', 'runFile'],
+        suite: ['debugTest', 'more', 'runTest'],
+        test: ['debugTest', 'more', 'runTest'],
+      });
+
+      await configuration.update('codeLens.fileActions', ['more'], vscode.ConfigurationTarget.Global);
+      await configuration.update('codeLens.suiteActions', ['inspect'], vscode.ConfigurationTarget.Global);
+      await configuration.update('codeLens.testActions', ['ui'], vscode.ConfigurationTarget.Global);
+      await configuration.update('codeLens.layout', 'custom', vscode.ConfigurationTarget.Global);
+      assertLayout(await codeLenses(uri), {
+        file: ['more'],
+        suite: ['inspectTest'],
+        test: ['openUi'],
+      });
+    } finally {
+      for (const key of keys) {
+        await configuration.update(key, previous.get(key), vscode.ConfigurationTarget.Global);
+      }
+    }
   });
 
   test('provides one CodeLens group for a data-driven test declaration', async () => {
@@ -82,6 +140,49 @@ suite('Playwright CodeLens Runner extension', () => {
     assert.strictEqual(runLenses.length, 1);
     const selection = runLenses[0].command?.arguments?.[0] as { titlePaths?: string[][] } | undefined;
     assert.strictEqual(selection?.titlePaths?.length, 3);
+    assert.ok((lenses ?? []).some((lens) => lens.command?.title === 'Cases (3)…'));
+  });
+
+  test('discovers a file whose name contains regular-expression metacharacters', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'metachar[smoke]+.spec.ts');
+    await vscode.workspace.openTextDocument(uri);
+    const lenses = await codeLenses(uri);
+    assert.ok(lenses.some((lens) => lens.command?.title === '$(play) Run File'));
+    assert.ok(lenses.some((lens) => lens.command?.title === '$(play) Run Test'));
+  });
+
+  test('keeps nested file suites out of CLI title paths and scopes suites/tests by line', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'nested', 'scoped.spec.ts');
+    await vscode.workspace.openTextDocument(uri);
+    const lenses = await codeLenses(uri);
+    const suiteLens = lenses.find((lens) => lens.command?.title === '$(eye) Inspect Suite');
+    const testLens = lenses.find((lens) => lens.command?.title === '$(eye) Inspect Test');
+    assert.ok(suiteLens?.command, 'nested suite Inspector lens is available');
+    assert.ok(testLens?.command, 'nested test Inspector lens is available');
+
+    const suiteSelection = suiteLens.command.arguments?.[0] as EditorTestSelection;
+    const testSelection = testLens.command.arguments?.[0] as EditorTestSelection;
+    assert.deepStrictEqual(suiteSelection.titlePath, ['nested suite']);
+    assert.deepStrictEqual(testSelection.titlePath, ['nested suite', 'nested test']);
+    assert.strictEqual(cliSelectionForEditor(suiteSelection).line, suiteSelection.position.line + 1);
+    assert.strictEqual(cliSelectionForEditor(testSelection).line, testSelection.position.line + 1);
+  });
+
+  test('keeps flattened title collisions distinct with source-line scope', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'title-collisions.spec.ts');
+    await vscode.workspace.openTextDocument(uri);
+    const lenses = await codeLenses(uri);
+    const inspectSelections = lenses
+      .filter((lens) => lens.command?.command === 'playwrightCodeLensRunner.inspectTest')
+      .map((lens) => lens.command?.arguments?.[0] as EditorTestSelection);
+
+    const nested = inspectSelections.find((selection) => selection.titlePath?.join(' › ') === 'foo › bar');
+    const flattened = inspectSelections.find((selection) => selection.titlePath?.join(' › ') === 'foo bar');
+    assert.ok(nested, 'nested foo/bar test is discovered');
+    assert.ok(flattened, 'top-level foo bar test is discovered');
+    assert.notStrictEqual(nested.position.line, flattened.position.line);
+    assert.strictEqual(cliSelectionForEditor(nested).line, nested.position.line + 1);
+    assert.strictEqual(cliSelectionForEditor(flattened).line, flattened.position.line + 1);
   });
 
   test('a CodeLens run is executed exactly once by the Microsoft extension', async () => {
@@ -107,6 +208,32 @@ suite('Playwright CodeLens Runner extension', () => {
     assert.deepStrictEqual(lines, ['run'], 'only the official TestController executes the selected test');
   });
 
+  test('file Run delegates by URI without companion CLI discovery', async () => {
+    const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
+    try {
+      await vscode.workspace.fs.delete(marker);
+    } catch {
+      // The preceding test may already have cleaned the marker.
+    }
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'delegation.spec.ts');
+    await vscode.commands.executeCommand('testing.refreshTests');
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+
+    let resolutionCalled = false;
+    const originalResolve = api.discovery.resolveTargetForFile;
+    api.discovery.resolveTargetForFile = async () => {
+      resolutionCalled = true;
+      throw new Error('native file runs must not resolve a companion CLI target');
+    };
+    try {
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runFile', uri);
+      assert.deepStrictEqual(await waitForMarker(marker), ['run']);
+    } finally {
+      api.discovery.resolveTargetForFile = originalResolve;
+    }
+    assert.strictEqual(resolutionCalled, false);
+  });
+
   test('rebuilds resolved targets when execution settings change', async () => {
     const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', fixture.uri);
     const previous = configuration.inspect<Record<string, string>>('environment')?.globalValue;
@@ -125,20 +252,209 @@ suite('Playwright CodeLens Runner extension', () => {
       await configuration.update('environment', previous, vscode.ConfigurationTarget.Global);
       await waitUntil(
         'resolved target environment to be restored',
-        () => api.discovery.currentTargets.every((target) => target.env.PW_COMPANION_SETTINGS_TEST !== marker),
+        () => api.discovery.currentTargets.length > 0
+          && api.discovery.currentTargets.every((target) => target.env.PW_COMPANION_SETTINGS_TEST !== marker),
       );
+    }
+  });
+
+  test('shows discovery recovery actions when the CLI fails', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'example.spec.ts');
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', uri);
+    const previous = configuration.inspect<string>('cli.executable')?.globalValue;
+    const missing = `playwright-codelens-missing-${Date.now()}`;
+    try {
+      await configuration.update('cli.executable', missing, vscode.ConfigurationTarget.Global);
+      await waitUntil(
+        'resolved target CLI to be rebuilt',
+        () => api.discovery.currentTargets.some((target) => target.cli.executable === missing),
+      );
+      const titles = new Set((await codeLenses(uri)).map((lens) => lens.command?.title));
+      assert.ok(titles.has('$(warning) Discovery failed'));
+      assert.ok(titles.has('Details'));
+      assert.ok(titles.has('Retry'));
+      assert.ok(titles.has('Choose CLI Config…'));
+    } finally {
+      await configuration.update('cli.executable', previous, vscode.ConfigurationTarget.Global);
+      await waitUntil(
+        'resolved target CLI to be restored',
+        () => api.discovery.currentTargets.length > 0
+          && api.discovery.currentTargets.every((target) => target.cli.executable !== missing),
+      );
+    }
+  });
+
+  test('refreshes discovery after an external-style test file change', async () => {
+    const target = api.discovery.currentTargets[0] ?? (await api.discovery.refreshTargets())[0];
+    assert.ok(target, 'fixture target is available');
+    await api.discovery.discover(target, undefined, true);
+    const before = api.discovery.diagnosticsFor(target.id)?.startedAt ?? 0;
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', `watcher-${Date.now()}.spec.ts`);
+    try {
+      await vscode.workspace.fs.writeFile(
+        uri,
+        Buffer.from("import { test } from '@playwright/test';\ntest('watcher refresh', async () => {});\n"),
+      );
+      await waitUntil(
+        'file watcher to refresh the owning target',
+        () => (api.discovery.diagnosticsFor(target.id)?.startedAt ?? 0) > before,
+      );
+    } finally {
+      try {
+        await vscode.workspace.fs.delete(uri);
+      } catch {
+        // The file may not have been created if the assertion failed early.
+      }
     }
   });
 
   test('forced discovery re-probes a previously unsupported target', async () => {
     const target = api.discovery.currentTargets[0] ?? (await api.discovery.refreshTargets())[0];
     assert.ok(target, 'fixture target is available');
-    const internals = api.discovery as unknown as { unsupported: Map<string, string> };
+    const internals = api.discovery as unknown as {
+      unsupported: Map<string, string>;
+      versions: Map<string, string>;
+    };
+    internals.versions.set(target.id, 'Version 1.37.0');
     internals.unsupported.set(target.id, 'synthetic unsupported-version result');
 
     const model = await api.discovery.discover(target, undefined, true);
     assert.ok(model, 'forced refresh recovered after the synthetic upgrade');
     assert.ok(!api.discovery.errorFor(target.id)?.includes('synthetic unsupported-version result'));
+    assert.ok(!internals.versions.get(target.id)?.includes('1.37.0'), 'the real CLI version replaced the cached unsupported version');
+  });
+
+  test('serializes overlapping forced discoveries for one target', async () => {
+    const target = api.discovery.currentTargets[0] ?? (await api.discovery.refreshTargets())[0];
+    assert.ok(target, 'fixture target is available');
+
+    const [first, second] = await Promise.all([
+      api.discovery.discover(target, undefined, true),
+      api.discovery.discover(target, undefined, true),
+    ]);
+    assert.ok(first, 'the earlier forced refresh is not cancelled by the later refresh');
+    assert.ok(second, 'the later forced refresh completes after the earlier refresh');
+  });
+
+  test('redacts sensitive CLI argument values from discovery diagnostics', async () => {
+    const source = api.discovery.currentTargets[0] ?? (await api.discovery.refreshTargets())[0];
+    assert.ok(source, 'fixture target is available');
+    const secret = `diagnostic-secret-${Date.now()}`;
+    const target = {
+      ...source,
+      id: `diagnostics:${Date.now()}`,
+      env: { ...source.env, PW_DIAGNOSTIC_SECRET: secret },
+      cli: {
+        executable: 'playwright-codelens-runner-command-that-does-not-exist',
+        argsPrefix: ['--token', secret],
+        source: 'explicit' as const,
+      },
+    };
+
+    const model = await api.discovery.discover(target, undefined, true);
+    assert.strictEqual(model, undefined);
+    const diagnostics = api.discovery.diagnosticsFor(target.id);
+    assert.ok(diagnostics, 'failed discovery records diagnostics');
+    assert.ok(!diagnostics.commandPreview.includes(secret), 'command preview redacts the adjacent token value');
+    assert.ok(!diagnostics.error?.includes(secret), 'error text redacts the adjacent token value');
+
+    const internals = api.discovery as unknown as {
+      recordDiagnostics(
+        diagnosticTarget: typeof target,
+        startedAt: number,
+        cliVersion: string,
+        args: string[],
+        scopeFile: string | undefined,
+        projects: string[],
+        error: string | undefined,
+      ): void;
+    };
+    internals.recordDiagnostics(
+      target,
+      Date.now(),
+      `Version ${secret}`,
+      [],
+      undefined,
+      [`project-${secret}`],
+      undefined,
+    );
+    assert.ok(!JSON.stringify(api.discovery.diagnosticsFor(target.id)).includes(secret));
+  });
+
+  test('discovery palette commands resolve the active Playwright file', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'example.spec.ts');
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: false });
+    const target = await api.discovery.resolveTargetForFile(uri.fsPath, { prompt: false });
+    assert.ok(target, 'active file resolves to a discovery target');
+    await api.discovery.discoverForFile(target, uri.fsPath, undefined, true);
+
+    let shownTarget: string | undefined;
+    let shownFile: string | undefined;
+    const originalShowDiagnostics = api.discovery.showDiagnostics;
+    api.discovery.showDiagnostics = (targetId: string, scopeFile?: string) => {
+      shownTarget = targetId;
+      shownFile = scopeFile;
+    };
+    try {
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.showDiscoveryDetails');
+    } finally {
+      api.discovery.showDiagnostics = originalShowDiagnostics;
+    }
+    assert.strictEqual(shownTarget, target.id, 'Details uses the active file target without a CodeLens payload');
+    assert.strictEqual(shownFile, uri.fsPath, 'Details preserves active-file diagnostic scope');
+
+    const before = api.discovery.diagnosticsFor(target.id, uri.fsPath)?.startedAt ?? 0;
+    await delay(5);
+    await vscode.commands.executeCommand('playwrightCodeLensRunner.retryDiscovery');
+    const after = api.discovery.diagnosticsFor(target.id, uri.fsPath)?.startedAt ?? 0;
+    assert.ok(after > before, 'Retry performs fresh file-scoped discovery for the active file');
+  });
+
+  test('discovery palette commands do not scope to an unrelated active document', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'package.json');
+    const document = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(document, { preview: false });
+    const target = api.discovery.currentTargets[0] ?? (await api.discovery.refreshTargets())[0];
+    assert.ok(target, 'fixture target is available');
+    const model = api.discovery.cachedModel(target.id) ?? await api.discovery.discover(target);
+    assert.ok(model, 'fixture discovery model is available');
+
+    let shownTarget: string | undefined;
+    let shownFile: string | undefined;
+    const originalShowDiagnostics = api.discovery.showDiagnostics;
+    api.discovery.showDiagnostics = (targetId: string, scopeFile?: string) => {
+      shownTarget = targetId;
+      shownFile = scopeFile;
+    };
+    try {
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.showDiscoveryDetails');
+    } finally {
+      api.discovery.showDiagnostics = originalShowDiagnostics;
+    }
+    assert.strictEqual(shownTarget, target.id, 'Details falls back to the selected config');
+    assert.strictEqual(shownFile, undefined, 'Details does not use an unrelated document as file scope');
+
+    let targetWideRetries = 0;
+    let fileScopedRetries = 0;
+    const originalDiscover = api.discovery.discover;
+    const originalDiscoverForFile = api.discovery.discoverForFile;
+    api.discovery.discover = async () => {
+      targetWideRetries++;
+      return model;
+    };
+    api.discovery.discoverForFile = async () => {
+      fileScopedRetries++;
+      return model;
+    };
+    try {
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.retryDiscovery');
+    } finally {
+      api.discovery.discover = originalDiscover;
+      api.discovery.discoverForFile = originalDiscoverForFile;
+    }
+    assert.strictEqual(targetWideRetries, 1, 'Retry refreshes the selected config');
+    assert.strictEqual(fileScopedRetries, 0, 'Retry does not refresh an unrelated document as a Playwright file');
   });
 
 });
@@ -164,6 +480,29 @@ async function waitForMarker(uri: vscode.Uri): Promise<string[]> {
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function codeLenses(uri: vscode.Uri): Promise<vscode.CodeLens[]> {
+  return (await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri)) ?? [];
+}
+
+type SelectionKind = 'file' | 'suite' | 'test';
+
+function assertLayout(
+  lenses: vscode.CodeLens[],
+  expected: Record<SelectionKind, string[]>,
+): void {
+  const prefix = 'playwrightCodeLensRunner.';
+  for (const kind of ['file', 'suite', 'test'] as const) {
+    const commands = new Set<string>();
+    for (const lens of lenses) {
+      const selection = lens.command?.arguments?.[0] as { kind?: string } | undefined;
+      if (selection?.kind === kind && lens.command?.command.startsWith(prefix)) {
+        commands.add(lens.command.command.slice(prefix.length));
+      }
+    }
+    assert.deepStrictEqual([...commands].sort(), [...expected[kind]].sort(), `${kind} CodeLens commands`);
+  }
 }
 
 async function waitUntil(description: string, predicate: () => boolean): Promise<void> {

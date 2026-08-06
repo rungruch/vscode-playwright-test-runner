@@ -16,7 +16,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     return undefined;
   }
 
-  const discovery = new DiscoveryService();
+  const discovery = new DiscoveryService(context);
   const projects = new ProjectPicker(context, discovery);
   const bridge = new OfficialPlaywrightBridge();
 
@@ -25,7 +25,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   registerCodeLensSupport(context, discovery);
 
   await bridge.activate();
-  void discovery.refreshTargets();
+  void discovery.refreshTargets().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(`Playwright target discovery failed: ${message}`);
+  });
 
   return { discovery, projects, bridge };
 }

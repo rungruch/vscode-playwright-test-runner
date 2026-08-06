@@ -24,29 +24,37 @@ export function escapeRegExp(input: string): string {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const TITLE_SEPARATOR = '\\s+(?:›\\s+)?(?:@\\S+\\s+)*(?:›\\s+)?';
+
 /**
  * Test filter that tolerates Playwright's project/file prefix, title-path
  * separators, and tags appended after the test title.
  */
-export function fullTitleFilter(titlePath: string | readonly string[]): string {
-  return `${filterTitlePath(titlePath)}(?:\\s+@\\S+)*$`;
+export function fullTitleFilter(titlePath: string | readonly string[], file: string): string {
+  return `${filterTitlePath(titlePath, file)}(?:\\s+@\\S+)*$`;
 }
 
 /** Suite filter that tolerates prefixes/separators and includes descendants. */
-export function suiteTitleFilter(titlePath: string | readonly string[]): string {
-  return filterTitlePath(titlePath);
+export function suiteTitleFilter(titlePath: string | readonly string[], file: string): string {
+  return `${filterTitlePath(titlePath, file)}(?:$|${TITLE_SEPARATOR})`;
 }
 
-function filterTitlePath(titlePath: string | readonly string[]): string {
+function filterTitlePath(titlePath: string | readonly string[], file: string): string {
   const titles = typeof titlePath === 'string' ? [titlePath] : titlePath;
-  return titles.map(escapeRegExp).join('.*');
+  const portableFile = file.replaceAll('\\', '/');
+  const fileName = portableFile.slice(portableFile.lastIndexOf('/') + 1);
+  const prefix = `(?:^|[\\s/\\\\])${escapeRegExp(fileName)}${TITLE_SEPARATOR}`;
+  return `${prefix}${titles.map(escapeRegExp).join(TITLE_SEPARATOR)}`;
 }
 
 /** Arguments for `playwright test --list --reporter=json` discovery. */
-export function buildDiscoveryArguments(options: { configFile?: string }): string[] {
+export function buildDiscoveryArguments(options: { configFile?: string; cwd?: string; files?: string[] }): string[] {
   const args = ['test', '--list', '--reporter=json'];
   if (options.configFile) {
     args.push('--config', options.configFile);
+  }
+  for (const file of options.files ?? []) {
+    args.push(playwrightFileFilter(file, options.cwd));
   }
   return args;
 }
@@ -74,7 +82,7 @@ function buildInteractiveArguments(
   // `--project <project-name...>`, otherwise Playwright can consume a trailing
   // `file:line` filter as another option value.
   for (const file of selection.files) {
-    const fileFilter = relativeOrAbsolute(file, options.cwd);
+    const fileFilter = playwrightFileFilter(file, options.cwd);
     args.push(selection.line ? `${fileFilter}:${selection.line}` : fileFilter);
   }
   if (options.browser) {
@@ -109,4 +117,10 @@ function relativeOrAbsolute(file: string, cwd: string): string {
     return relative;
   }
   return file;
+}
+
+/** Playwright treats positional file arguments as regular expressions. */
+function playwrightFileFilter(file: string, cwd?: string): string {
+  const fileFilter = cwd ? relativeOrAbsolute(file, cwd) : file;
+  return escapeRegExp(fileFilter.replaceAll('\\', '/'));
 }

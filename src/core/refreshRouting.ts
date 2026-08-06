@@ -5,11 +5,16 @@ export interface RefreshableTarget {
   configFile?: string;
 }
 
-/** Selects exact config targets, otherwise every target at the deepest containing directory. */
+/**
+ * Selects exact config targets, otherwise every target at the deepest
+ * containing directory plus any persisted/discovered owners supplied by the
+ * caller. Owners matter when a config's testDir points outside configDir.
+ */
 export function targetsForChangedPath<T extends RefreshableTarget>(
   targets: readonly T[],
   fsPath: string,
   configChanged: boolean,
+  owners: readonly T[] = [],
 ): T[] {
   const changed = path.normalize(fsPath);
   if (configChanged) {
@@ -23,9 +28,10 @@ export function targetsForChangedPath<T extends RefreshableTarget>(
     .filter((target) => containsPath(target.configDir, changed))
     .sort((a, b) => b.configDir.length - a.configDir.length);
   const deepest = containing[0]?.configDir.length;
-  return deepest === undefined
+  const selected = deepest === undefined
     ? []
     : containing.filter((target) => target.configDir.length === deepest);
+  return [...new Set([...selected, ...owners])];
 }
 
 function containsPath(directory: string, candidate: string): boolean {

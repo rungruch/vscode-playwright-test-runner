@@ -15,10 +15,14 @@ export function cliSelectionForEditor(selection: EditorTestSelection): RunSelect
   }
   for (const titlePath of titlePaths) {
     if (selection.kind === 'test' && titlePath.length > 0) {
-      titleFilters.push(fullTitleFilter(titlePath));
+      titleFilters.push(fullTitleFilter(titlePath, selection.file));
     } else if (selection.kind === 'suite' && titlePath.length > 0) {
-      titleFilters.push(suiteTitleFilter(titlePath));
+      titleFilters.push(suiteTitleFilter(titlePath, selection.file));
     }
   }
-  return { files: [selection.file], titleFilters };
+  return {
+    files: [selection.file],
+    titleFilters,
+    ...(selection.kind === 'file' ? {} : { line: selection.position.line + 1 }),
+  };
 }
