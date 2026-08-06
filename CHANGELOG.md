@@ -1,9 +1,14 @@
 # Change Log
 
+## 3.1.0 - 2026-08-06
+
+- Add companion-owned Flake Lab runs, changed/last-failed UI workflows, tag actions, remote UI profiles, and a Playwright Activity Bar view for local CLI summaries and artifacts. Native results remain owned by Microsoft Playwright Testing.
+
 ## 3.0.1 - 2026-08-06
 
 - Automatically discover and live-refresh conventional variant Playwright configs such as `playwright.db.config.ts`, `playwright.no-db.config.ts`, and `playwright.pdf.config.ts`.
 - Rename the Command Palette entry to **Select CLI Config for Current File** and document its persisted per-file companion CLI selection.
+- Make config-picker filenames the primary label, with concise workspace-relative paths and discovery status as secondary context.
 - Add extension-host coverage for variant config ownership and watcher-driven refresh.
 
 ## 3.0.0 - 2026-08-06

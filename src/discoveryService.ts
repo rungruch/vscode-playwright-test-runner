@@ -319,7 +319,8 @@ export class DiscoveryService implements vscode.Disposable {
     const picked = await vscode.window.showQuickPick(
       candidates.map((target) => ({
         label: targetLabelForResolver(target),
-        description: this.errorFor(target.id, fsPath) ? 'Discovery failed — select for Details/Retry' : undefined,
+        description: targetDescriptionForResolver(target),
+        detail: this.errorFor(target.id, fsPath) ? 'Discovery failed — select for Details/Retry' : undefined,
         target,
       })),
       {
@@ -932,8 +933,15 @@ function targetFingerprint(target: RunTarget): string {
 }
 
 function targetLabelForResolver(target: RunTarget): string {
+  return target.configFile
+    ? path.basename(target.configFile)
+    : `${path.basename(target.configDir)} (no config)`;
+}
+
+function targetDescriptionForResolver(target: RunTarget): string {
   const base = target.configFile ?? target.configDir;
-  return `${target.workspaceFolder.name}: ${base}`;
+  const relative = path.relative(target.workspaceFolder.uri.fsPath, base);
+  return `${target.workspaceFolder.name}: ${relative || '.'}`;
 }
 
 function commandPreview(target: RunTarget, args: string[]): string {
