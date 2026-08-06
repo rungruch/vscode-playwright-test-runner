@@ -1,14 +1,20 @@
 import * as vscode from 'vscode';
+import { ArtifactService } from './artifactService';
 import { registerCodeLensSupport } from './codeLens';
 import { registerCommands } from './commands';
+import { CompanionCliRunner } from './companionRunner';
 import { DiscoveryService } from './discoveryService';
+import { InteractiveSessionManager } from './interactiveSessions';
 import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
+import { PlaywrightSidebar } from './sidebar';
 
 export interface ExtensionApi {
   discovery: DiscoveryService;
   projects: ProjectPicker;
   bridge: OfficialPlaywrightBridge;
+  runner: CompanionCliRunner;
+  artifacts: ArtifactService;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<ExtensionApi | undefined> {
@@ -16,18 +22,25 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
     return undefined;
   }
 
-  const discovery = new DiscoveryService();
+  const discovery = new DiscoveryService(context);
   const projects = new ProjectPicker(context, discovery);
   const bridge = new OfficialPlaywrightBridge();
+  const runner = new CompanionCliRunner(context);
+  const artifacts = new ArtifactService();
+  const sessions = new InteractiveSessionManager();
+  const sidebar = new PlaywrightSidebar(context, runner, artifacts, sessions);
 
-  context.subscriptions.push(discovery);
-  registerCommands({ context, discovery, bridge, projects });
+  context.subscriptions.push(discovery, runner, artifacts, sessions);
+  registerCommands({ context, discovery, bridge, projects, runner, artifacts, sessions, sidebar });
   registerCodeLensSupport(context, discovery);
 
   await bridge.activate();
-  void discovery.refreshTargets();
+  void discovery.refreshTargets().catch((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    void vscode.window.showErrorMessage(`Playwright target discovery failed: ${message}`);
+  });
 
-  return { discovery, projects, bridge };
+  return { discovery, projects, bridge, runner, artifacts };
 }
 
 export function deactivate(): void {

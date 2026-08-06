@@ -20,6 +20,7 @@ suite('selectionArguments', () => {
       'chromium tests/badge.spec.ts Verify Badge › renders tagged state @badge',
       new RegExp(selection.titleFilters[0]),
     );
+    assert.strictEqual(selection.line, BASE.position.line + 1);
   });
 
   test('suite scope includes descendant test titles', () => {
@@ -33,6 +34,22 @@ suite('selectionArguments', () => {
       'webkit tests/badge.spec.ts Verify Badge › nested › works @badge',
       new RegExp(selection.titleFilters[0]),
     );
+    assert.strictEqual(selection.line, BASE.position.line + 1);
+  });
+
+  test('keeps file selections unqualified by a source line', () => {
+    const selection = cliSelectionForEditor({
+      ...BASE,
+      kind: 'file',
+      fullTitle: undefined,
+      titlePath: undefined,
+      position: { line: 0, character: 0 },
+    });
+
+    assert.deepStrictEqual(selection, {
+      files: [BASE.file],
+      titleFilters: [],
+    });
   });
 
   test('uses a source-line filter for collapsed data-driven cases', () => {
@@ -49,5 +66,21 @@ suite('selectionArguments', () => {
       titleFilters: [],
       line: 17,
     });
+  });
+
+  test('keeps the declaration line and exact grep for one selected generated case', () => {
+    const selection = cliSelectionForEditor({
+      ...BASE,
+      position: { line: 16, character: 2 },
+      titlePath: ['Verify Badge', 'case two'],
+      titlePaths: [['Verify Badge', 'case two']],
+    });
+
+    assert.deepStrictEqual(selection.files, [BASE.file]);
+    assert.strictEqual(selection.line, 17);
+    const exact = new RegExp(selection.titleFilters[0]);
+    assert.match('chromium tests/badge.spec.ts Verify Badge case two', exact);
+    assert.doesNotMatch('chromium tests/badge.spec.ts Verify Badge supercase two', exact);
+    assert.doesNotMatch('chromium tests/badge.spec.ts Verify Badge case one case two', exact);
   });
 });

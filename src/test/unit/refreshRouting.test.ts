@@ -30,4 +30,21 @@ suite('refreshRouting', () => {
       ['root', 'alternate'],
     );
   });
+
+  test('keeps persisted and discovered owners alongside the deepest target', () => {
+    const sibling = {
+      configDir: '/workspace/configs',
+      configFile: '/workspace/configs/playwright.config.ts',
+      id: 'sibling',
+    };
+    assert.deepStrictEqual(
+      targetsForChangedPath(
+        [ROOT, NESTED, sibling],
+        '/workspace/packages/shop/tests/a.spec.ts',
+        false,
+        [ROOT, sibling],
+      ).map((target) => target.id),
+      ['nested', 'root', 'sibling'],
+    );
+  });
 });

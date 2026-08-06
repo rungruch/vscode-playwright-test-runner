@@ -1,5 +1,31 @@
 # Change Log
 
+## 3.1.0 - 2026-08-06
+
+- Add companion-owned Flake Lab runs, changed/last-failed UI workflows, tag actions, remote UI profiles, and a Playwright Activity Bar view for local CLI summaries and artifacts. Native results remain owned by Microsoft Playwright Testing.
+
+## 3.0.1 - 2026-08-06
+
+- Automatically discover and live-refresh conventional variant Playwright configs such as `playwright.db.config.ts`, `playwright.no-db.config.ts`, and `playwright.pdf.config.ts`.
+- Rename the Command Palette entry to **Select CLI Config for Current File** and document its persisted per-file companion CLI selection.
+- Make config-picker filenames the primary label, with concise workspace-relative paths and discovery status as secondary context.
+- Add extension-host coverage for variant config ownership and watcher-driven refresh.
+
+## 3.0.0 - 2026-08-06
+
+- Added `full`, `compact`, and `custom` CodeLens layouts with independently configurable file, suite, and test actions. CLI config selection and generated-case selection are first-class `config` and `cases` actions.
+- Added fast file-scoped Playwright discovery with bounded concurrency, cancellable version probes, per-file caching, and portable, regex-safe file filters for discovery, Inspector, and UI.
+- Added noninteractive ownership resolution for overlapping configs. Explicit CLI config choices are revalidated and persisted per file, cross-root and sibling `testDir` layouts are supported, and file-system changes refresh selected/discovered owners instead of relying on config-directory ancestry alone.
+- Clarified generated-case scope: Microsoft-owned Run/Debug and direct companion Inspector/UI target the complete generated declaration, while **Cases (N)…** selects one exact Inspector/UI case using the declaration line plus file- and title-boundary-aware grep.
+- Added editor discovery-failure lenses, a sanitized diagnostics channel, Details and Retry commands, and configured-Playwright-file/config fallback when those commands are invoked from the Command Palette.
+- Added **More Playwright Actions…**, **Pick an Exact Generated Case**, and **Select CLI Config for File** commands.
+- Forced discovery now re-probes the Playwright CLI version, allowing an upgraded installation to recover without reloading VS Code.
+- Native file Run/Debug now dispatches its URI directly to Microsoft Testing without requiring companion CLI discovery or config selection.
+- Workspace-scoped target identities prevent shared config paths from colliding in multi-root workspaces, and automatic config discovery no longer stops after 50 configs.
+- Inspector/UI scopes combine declaration lines with exact title boundaries, preserving nested file paths, distinguishing flattened title collisions, and accepting Playwright tags attached to configs, `describe` blocks, and tests.
+- Expanded unit and extension-host coverage for layouts, generated cases, safe discovery filters, sensitive diagnostics, sibling and overlapping configs, persisted ownership, refresh routing, and command registration.
+- Kept Microsoft Playwright as the sole native TestController and retained the `{ discovery, projects, bridge }` extension API.
+
 ## 2.1.0 - 2026-08-06
 
 - Released version 2.1 as a clean break from the original v1 runner.

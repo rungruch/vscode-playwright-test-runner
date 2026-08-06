@@ -7,7 +7,7 @@ import { PackageManager, detectPackageManager, findLocalPlaywrightCli } from './
  */
 export interface CliCommand {
   executable: string;
-  /** Arguments placed before the Playwright sub-command (e.g. ['playwright'] for npx). */
+  /** Arguments placed before the Playwright sub-command (e.g. ['--no-install', 'playwright'] for npx). */
   argsPrefix: string[];
   /** Human-readable origin for diagnostics. */
   source: 'explicit' | 'local-install' | 'package-manager';
@@ -74,10 +74,10 @@ export function packageManagerCommand(manager: PackageManager): CliCommand {
     case 'yarn':
       return { executable: win ? 'yarn.cmd' : 'yarn', argsPrefix: ['playwright'], source: 'package-manager' };
     case 'bun':
-      return { executable: win ? 'bunx.cmd' : 'bunx', argsPrefix: ['playwright'], source: 'package-manager' };
+      return { executable: win ? 'bunx.cmd' : 'bunx', argsPrefix: ['--no-install', 'playwright'], source: 'package-manager' };
     case 'npm':
     default:
-      return { executable: win ? 'npx.cmd' : 'npx', argsPrefix: ['playwright'], source: 'package-manager' };
+      return { executable: win ? 'npx.cmd' : 'npx', argsPrefix: ['--no-install', 'playwright'], source: 'package-manager' };
   }
 }
 

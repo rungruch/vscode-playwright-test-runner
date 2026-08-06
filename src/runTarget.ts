@@ -11,7 +11,7 @@ import { Settings } from './settings';
  * command, cwd, environment and options.
  */
 export interface RunTarget {
-  /** Stable id: absolute config path, or `configless:<cwd>` for configless projects. */
+  /** Stable id scoped by workspace folder so shared configs cannot collide. */
   id: string;
   workspaceFolder: vscode.WorkspaceFolder;
   configFile?: string;
@@ -52,7 +52,10 @@ export function resolveRunTarget(
   }
 
   return {
-    id: configFile ?? `configless:${configDir}`,
+    id: JSON.stringify([
+      workspaceFolder.uri.toString(),
+      configFile ?? `configless:${configDir}`,
+    ]),
     workspaceFolder,
     configFile,
     configDir,

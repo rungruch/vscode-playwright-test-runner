@@ -39,9 +39,9 @@ export default defineConfig({
       ...common,
     },
     {
-      label: 'multiRoot',
+      label: 'multiRootOwnership',
       files: 'out/test/extension/multiroot.test.js',
-      // Nested configs across two workspace roots on the earliest tested host.
+      // Multi-root discovery plus overlapping, sibling, and cross-root ownership.
       version: '1.125.1',
       workspaceFolder: 'fixtures/multipkg/multi-root.code-workspace',
       ...common,

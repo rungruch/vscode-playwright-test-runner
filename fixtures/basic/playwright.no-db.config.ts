@@ -1,10 +1,10 @@
 import { defineConfig } from '@playwright/test';
 
-// Browserless fixture: tests only use expect/assertions, so no browser
-// download is required to run them in CI.
+// Conventional non-default config name: this verifies automatic discovery of
+// project layouts that split database and browser-only suites.
 export default defineConfig({
   testDir: './tests',
-  testIgnore: 'no-db-only.spec.ts',
+  testMatch: 'no-db-only.spec.ts',
   reporter: 'line',
   workers: 2,
   projects: [{ name: 'browserless' }],

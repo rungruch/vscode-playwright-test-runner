@@ -18,13 +18,12 @@ export class OfficialPlaywrightBridge {
 
   async run(selection: EditorTestSelection, mode: OfficialRunMode): Promise<void> {
     const invocation = officialCommandFor(selection, mode);
-    if (!(await this.ensureCommand(invocation.command))) {
-      return;
-    }
-
     const uri = vscode.Uri.parse(selection.uri);
     if (invocation.usesUri) {
-      await vscode.commands.executeCommand(invocation.command, uri);
+      await this.runUri(uri, mode);
+      return;
+    }
+    if (!(await this.ensureCommand(invocation.command))) {
       return;
     }
 
@@ -35,6 +34,13 @@ export class OfficialPlaywrightBridge {
     editor.selection = new vscode.Selection(position, position);
     editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     await vscode.commands.executeCommand(invocation.command);
+  }
+
+  async runUri(uri: vscode.Uri, mode: OfficialRunMode): Promise<void> {
+    const command = mode === 'run' ? 'testing.run.uri' : 'testing.debug.uri';
+    if (await this.ensureCommand(command)) {
+      await vscode.commands.executeCommand(command, uri);
+    }
   }
 
   async runAtActiveCursor(mode: OfficialRunMode): Promise<void> {

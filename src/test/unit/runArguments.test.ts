@@ -2,6 +2,10 @@ import * as assert from 'assert';
 import {
   buildDebugArguments,
   buildDiscoveryArguments,
+  buildChangedUiArguments,
+  buildFlakeLabArguments,
+  buildLastFailedUiArguments,
+  buildTagArguments,
   buildUiArguments,
   combineFilters,
   escapeRegExp,
@@ -15,18 +19,43 @@ suite('runArguments', () => {
   });
 
   test('builds prefix-, separator-, and tag-tolerant title-path filters', () => {
-    const testFilter = fullTitleFilter(['Login flow (fast)', 'logs in']);
-    const suiteFilter = suiteTitleFilter(['Login flow (fast)', 'nested']);
+    const file = '/ws/tests/login.spec.ts';
+    const testFilter = fullTitleFilter(['Login flow (fast)', 'logs in'], file);
+    const suiteFilter = suiteTitleFilter(['Login flow (fast)', 'nested'], file);
 
-    assert.strictEqual(testFilter, 'Login flow \\(fast\\).*logs in(?:\\s+@\\S+)*$');
-    assert.strictEqual(suiteFilter, 'Login flow \\(fast\\).*nested');
     assert.match(
-      'chromium tests/login.spec.ts Login flow (fast) › logs in @smoke @auth',
+      'chromium tests/login.spec.ts Login flow (fast) logs in @smoke @auth',
       new RegExp(testFilter),
     );
     assert.match(
       'webkit tests/login.spec.ts Login flow (fast) › nested › rejects bad password @auth',
       new RegExp(suiteFilter),
+    );
+  });
+
+  test('keeps exact title-path boundaries for generated cases', () => {
+    const file = '/ws/tests/generated.spec.ts';
+    const exact = new RegExp(fullTitleFilter(['admin'], file));
+    assert.match('chromium tests/generated.spec.ts admin', exact);
+    assert.doesNotMatch('chromium tests/generated.spec.ts superadmin', exact);
+    assert.doesNotMatch('chromium tests/generated.spec.ts super admin', exact);
+
+    const nested = new RegExp(fullTitleFilter(['foo', 'bar'], file));
+    assert.match('webkit tests/generated.spec.ts foo bar', nested);
+    assert.doesNotMatch('webkit tests/generated.spec.ts foobar', nested);
+    assert.doesNotMatch('webkit tests/generated.spec.ts foo something bar', nested);
+  });
+
+  test('allows Playwright describe tags between title-path segments', () => {
+    const file = '/ws/tests/tagged.spec.ts';
+    const filter = new RegExp(fullTitleFilter(['group', 'nested', 'works'], file));
+    assert.match(
+      'chromium tests/tagged.spec.ts group @suite nested @nested works @test',
+      filter,
+    );
+    assert.doesNotMatch(
+      'chromium tests/tagged.spec.ts group @suite nested @nested also works @test',
+      filter,
     );
   });
 
@@ -41,6 +70,18 @@ suite('runArguments', () => {
       ['test', '--list', '--reporter=json', '--config', '/ws/playwright.config.ts'],
     );
     assert.deepStrictEqual(buildDiscoveryArguments({}), ['test', '--list', '--reporter=json']);
+    assert.deepStrictEqual(
+      buildDiscoveryArguments({
+        configFile: '/ws/playwright.config.ts',
+        cwd: '/ws',
+        files: ['/ws/tests/login[smoke].spec.ts'],
+      }),
+      ['test', '--list', '--reporter=json', '--config', '/ws/playwright.config.ts', 'tests/login\\[smoke\\]\\.spec\\.ts'],
+    );
+    assert.deepStrictEqual(
+      buildDiscoveryArguments({ files: ['C:\\work space\\tests\\login.spec.ts'] }),
+      ['test', '--list', '--reporter=json', 'C:/work space/tests/login\\.spec\\.ts'],
+    );
   });
 
   test('builds scoped Playwright UI arguments with CLI projects', () => {
@@ -57,7 +98,7 @@ suite('runArguments', () => {
       [
         'test', '--ui',
         '--config', '/ws/playwright.config.ts',
-        'tests/login.spec.ts',
+        'tests/login\\.spec\\.ts',
         '--project', 'chromium',
         '--project', 'webkit',
         '--headed',
@@ -75,7 +116,7 @@ suite('runArguments', () => {
       [
         'test', '--debug',
         '--config', '/ws/playwright.config.ts',
-        'tests/login.spec.ts',
+        'tests/login\\.spec\\.ts',
         '--project', 'chromium',
         '--grep', 'Login succeeds(?:\\s+@\\S+)*$',
       ],
@@ -88,7 +129,7 @@ suite('runArguments', () => {
         { files: ['/ws/tests/login.spec.ts'], titleFilters: [] },
         { cwd: '/ws', browser: 'firefox' },
       ),
-      ['test', '--debug', 'tests/login.spec.ts', '--browser', 'firefox'],
+      ['test', '--debug', 'tests/login\\.spec\\.ts', '--browser', 'firefox'],
     );
   });
 
@@ -105,7 +146,7 @@ suite('runArguments', () => {
       [
         'test', '--debug',
         '--config', '/work space/configs/playwright custom.config.ts',
-        'e2e tests/login.spec.ts',
+        'e2e tests/login\\.spec\\.ts',
         '--timeout=2500',
       ],
     );
@@ -116,7 +157,24 @@ suite('runArguments', () => {
       { files: ['/elsewhere/x.spec.ts'], titleFilters: [] },
       { cwd: '/ws' },
     );
-    assert.ok(args.includes('/elsewhere/x.spec.ts'));
+    assert.ok(args.includes('/elsewhere/x\\.spec\\.ts'));
+  });
+
+  test('escapes portable Inspector/UI file regexes', () => {
+    assert.deepStrictEqual(
+      buildDebugArguments(
+        { files: ['/ws/tests/metachar[smoke]+.spec.ts'], titleFilters: [] },
+        { cwd: '/ws' },
+      ),
+      ['test', '--debug', 'tests/metachar\\[smoke\\]\\+\\.spec\\.ts'],
+    );
+    assert.deepStrictEqual(
+      buildUiArguments(
+        { files: ['C:\\work space\\tests\\login.spec.ts'], titleFilters: [] },
+        { cwd: '/ws' },
+      ),
+      ['test', '--ui', 'C:/work space/tests/login\\.spec\\.ts'],
+    );
   });
 
   test('builds a Playwright file:line filter for generated cases', () => {
@@ -126,8 +184,85 @@ suite('runArguments', () => {
     );
     assert.deepStrictEqual(args, [
       'test', '--debug',
-      'tests/dynamic.spec.ts:17',
+      'tests/dynamic\\.spec\\.ts:17',
       '--project', 'chromium',
     ]);
+  });
+
+  test('keeps the source line when an exact generated case also has a title filter', () => {
+    const args = buildDebugArguments(
+      {
+        files: ['/ws/tests/dynamic.spec.ts'],
+        titleFilters: ['Dynamic case.*second(?:\\s+@\\S+)*$'],
+        line: 17,
+      },
+      { cwd: '/ws' },
+    );
+    assert.deepStrictEqual(args, [
+      'test', '--debug',
+      'tests/dynamic\\.spec\\.ts:17',
+      '--grep', 'Dynamic case.*second(?:\\s+@\\S+)*$',
+    ]);
+  });
+
+  test('builds Flake Lab defaults after scoped file, project, and grep arguments', () => {
+    assert.deepStrictEqual(
+      buildFlakeLabArguments(
+        { files: ['/ws/tests/login.spec.ts'], titleFilters: ['Login flow'], line: 12 },
+        {
+          configFile: '/ws/playwright.config.ts',
+          cwd: '/ws',
+          projects: ['chromium'],
+          extraOptions: ['--headed'],
+          repeatEach: 10,
+          workers: 1,
+          retries: 1,
+          trace: 'on',
+          failOnFlakyTests: true,
+        },
+      ),
+      [
+        'test', '--config', '/ws/playwright.config.ts', 'tests/login\\.spec\\.ts:12',
+        '--project', 'chromium', '--grep', 'Login flow',
+        '--repeat-each', '10', '--workers', '1', '--retries', '1', '--trace', 'on',
+        '--fail-on-flaky-tests', '--headed',
+      ],
+    );
+  });
+
+  test('builds target-scoped changed and last-failed UI arguments', () => {
+    const options = {
+      configFile: '/ws/playwright.config.ts',
+      cwd: '/ws',
+      projects: ['chromium'],
+      uiHost: '0.0.0.0',
+      uiPort: 8080,
+    };
+    assert.deepStrictEqual(
+      buildChangedUiArguments(options, 'origin/main'),
+      [
+        'test', '--ui', '--config', '/ws/playwright.config.ts', '--project', 'chromium',
+        '--ui-host', '0.0.0.0', '--ui-port', '8080', '--only-changed', 'origin/main',
+      ],
+    );
+    assert.deepStrictEqual(
+      buildLastFailedUiArguments(options),
+      [
+        'test', '--ui', '--config', '/ws/playwright.config.ts', '--project', 'chromium',
+        '--ui-host', '0.0.0.0', '--ui-port', '8080', '--last-failed',
+      ],
+    );
+  });
+
+  test('puts a discovered tag in one structured grep token for UI and Inspector', () => {
+    const options = { cwd: '/ws', projects: ['webkit'] };
+    assert.deepStrictEqual(
+      buildTagArguments('ui', '@smoke', options),
+      ['test', '--ui', '--project', 'webkit', '--grep', '@smoke'],
+    );
+    assert.deepStrictEqual(
+      buildTagArguments('debug', '@auth-api', options),
+      ['test', '--debug', '--project', 'webkit', '--grep', '@auth-api'],
+    );
   });
 });

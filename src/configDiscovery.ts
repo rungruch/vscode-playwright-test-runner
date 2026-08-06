@@ -4,7 +4,14 @@ import { substituteVariables } from './core/variables';
 import { RunTarget, resolveRunTarget } from './runTarget';
 import { Settings } from './settings';
 
-const CONFIG_GLOB = '**/playwright.config.{js,cjs,mjs,ts,cts,mts}';
+/**
+ * The usual Playwright config plus conventional variants such as
+ * `playwright.no-db.config.ts` and `playwright.pdf.config.ts`.
+ *
+ * Arbitrary names stay opt-in through `playwrightCodeLensRunner.configFiles`
+ * so helper files such as `e2e.config.ts` are never executed unexpectedly.
+ */
+export const PLAYWRIGHT_CONFIG_GLOB = '**/playwright*.config.{js,cjs,mjs,ts,cts,mts}';
 const EXCLUDE_GLOB = '**/{node_modules,out,dist,.git}/**';
 
 /**
@@ -33,9 +40,8 @@ export async function discoverRunTargets(onProgress?: (message: string) => void)
 
     onProgress?.(`Scanning ${folder.name} for Playwright configs`);
     const found = await vscode.workspace.findFiles(
-      new vscode.RelativePattern(folder, CONFIG_GLOB),
+      new vscode.RelativePattern(folder, PLAYWRIGHT_CONFIG_GLOB),
       EXCLUDE_GLOB,
-      50,
     );
     if (found.length === 0) {
       targets.push(resolveRunTarget(folder, undefined, settings));
@@ -51,7 +57,7 @@ export async function discoverRunTargets(onProgress?: (message: string) => void)
 
 /** Config file patterns relevant for save-based refresh. */
 export function isConfigFile(fsPath: string): boolean {
-  return /(^|[\\/])[^\\/]*playwright\.config\.(js|cjs|mjs|ts|cts|mts)$/.test(fsPath);
+  return /(^|[\\/])playwright[^\\/]*\.config\.(js|cjs|mjs|ts|cts|mts)$/.test(fsPath);
 }
 
 export function isTestFile(fsPath: string): boolean {

@@ -48,7 +48,7 @@ export function parseDiscoveryOutput(
   const files = new Map<string, DiscoveredFile>();
 
   for (const suite of report.suites ?? []) {
-    collectSuite(suite, config, files, projectNames, []);
+    collectSuite(suite, config, files, projectNames, [], true);
   }
 
   // Dynamic tests (e.g. generated in loops inside test.describe.configure or
@@ -69,6 +69,7 @@ function collectSuite(
   files: Map<string, DiscoveredFile>,
   projectNames: Set<string>,
   titlePath: string[],
+  rootLevel: boolean,
 ): void {
   if (!suite || typeof suite !== 'object') {
     return;
@@ -77,7 +78,10 @@ function collectSuite(
   const title = typeof suite.title === 'string' ? suite.title : '';
   const fileEntry = file ? ensureFile(config, files, file) : undefined;
 
-  const isFileSuite = titlePath.length === 0 && file && title === path.basename(file);
+  const isFileSuite = rootLevel
+    && titlePath.length === 0
+    && file !== undefined
+    && isRootFileSuiteTitle(title, file, config.rootDir);
   const suitePath = isFileSuite ? titlePath : title ? [...titlePath, title] : titlePath;
 
   let node: DiscoveredSuite | undefined;
@@ -110,7 +114,7 @@ function collectSuite(
 
   for (const child of suite.suites ?? []) {
     const before = fileEntry?.suites.length ?? 0;
-    collectSuite(child, config, files, projectNames, suitePath);
+    collectSuite(child, config, files, projectNames, suitePath, false);
     // Nest child suites that were appended as top-level entries of the file.
     if (node && fileEntry && fileEntry.suites.length > before) {
       const nested = fileEntry.suites.splice(before);
@@ -188,6 +192,18 @@ function normalizeFile(file: string | undefined, config: DiscoveredConfig): stri
   }
   const absolute = path.isAbsolute(file) ? file : path.resolve(config.rootDir, file);
   return path.normalize(absolute);
+}
+
+function isRootFileSuiteTitle(title: string, file: string, rootDir: string): boolean {
+  const normalizedTitle = portablePath(title);
+  const relativeFile = portablePath(path.relative(rootDir, file));
+  // Current Playwright reporters title a root file suite with its path relative
+  // to rootDir. Keep the basename fallback for older/minimal JSON reporters.
+  return normalizedTitle === relativeFile || normalizedTitle === portablePath(path.basename(file));
+}
+
+function portablePath(value: string): string {
+  return path.posix.normalize(value.replaceAll('\\', '/'));
 }
 
 /**

@@ -88,10 +88,10 @@ suite('cliResolution', () => {
   });
 
   test('package manager commands are structured (no shell strings)', () => {
-    assert.deepStrictEqual(packageManagerCommand('npm').argsPrefix, ['playwright']);
+    assert.deepStrictEqual(packageManagerCommand('npm').argsPrefix, ['--no-install', 'playwright']);
     assert.deepStrictEqual(packageManagerCommand('pnpm').argsPrefix, ['exec', 'playwright']);
     assert.deepStrictEqual(packageManagerCommand('yarn').argsPrefix, ['playwright']);
-    assert.deepStrictEqual(packageManagerCommand('bun').argsPrefix, ['playwright']);
+    assert.deepStrictEqual(packageManagerCommand('bun').argsPrefix, ['--no-install', 'playwright']);
   });
 
   test('windows executables use .cmd shims', () => {
