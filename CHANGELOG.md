@@ -1,5 +1,11 @@
 # Change Log
 
+## 3.0.1 - 2026-08-06
+
+- Automatically discover and live-refresh conventional variant Playwright configs such as `playwright.db.config.ts`, `playwright.no-db.config.ts`, and `playwright.pdf.config.ts`.
+- Rename the Command Palette entry to **Select CLI Config for Current File** and document its persisted per-file companion CLI selection.
+- Add extension-host coverage for variant config ownership and watcher-driven refresh.
+
 ## 3.0.0 - 2026-08-06
 
 - Added `full`, `compact`, and `custom` CodeLens layouts with independently configurable file, suite, and test actions. CLI config selection and generated-case selection are first-class `config` and `cases` actions.

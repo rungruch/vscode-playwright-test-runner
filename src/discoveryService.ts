@@ -12,7 +12,7 @@ import { DiscoveredConfig } from './core/model';
 import { targetsForChangedPath } from './core/refreshRouting';
 import { ScopedTaskQueue } from './core/scopedTaskQueue';
 import { isSupportedPlaywrightVersion } from './core/version';
-import { discoverRunTargets, isConfigFile, isTestFile } from './configDiscovery';
+import { discoverRunTargets, isConfigFile, isTestFile, PLAYWRIGHT_CONFIG_GLOB } from './configDiscovery';
 import { probeCliVersion, spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 import { SETTINGS_NAMESPACE, Settings } from './settings';
@@ -89,7 +89,7 @@ export class DiscoveryService implements vscode.Disposable {
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
-    const configWatcher = vscode.workspace.createFileSystemWatcher('**/playwright.config.{js,cjs,mjs,ts,cts,mts}');
+    const configWatcher = vscode.workspace.createFileSystemWatcher(PLAYWRIGHT_CONFIG_GLOB);
     this.disposables.push(
       configWatcher,
       configWatcher.onDidCreate((uri) => this.scheduleRefresh(uri.fsPath, true)),
@@ -412,12 +412,12 @@ export class DiscoveryService implements vscode.Disposable {
     }
     const watched = new Set<string>();
     for (const target of this.targets) {
-      const coveredByStandardWatcher = target.configFile
-        && isStandardConfigPath(target.configFile)
+      const coveredByConfigWatcher = target.configFile
+        && isConfigFile(target.configFile)
         && (vscode.workspace.workspaceFolders ?? []).some((folder) => containsPath(folder.uri.fsPath, target.configFile ?? ''));
       if (
         !target.configFile
-        || coveredByStandardWatcher
+        || coveredByConfigWatcher
         || watched.has(target.configFile)
       ) {
         continue;
@@ -891,10 +891,6 @@ async function runWithConcurrency<T>(items: readonly T[], limit: number, task: (
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => worker()));
-}
-
-function isStandardConfigPath(fsPath: string): boolean {
-  return /^playwright\.config\.(js|cjs|mjs|ts|cts|mts)$/.test(path.basename(fsPath));
 }
 
 function configOwnerKey(fsPath: string): string {

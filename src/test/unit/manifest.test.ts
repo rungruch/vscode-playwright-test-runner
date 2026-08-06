@@ -31,13 +31,17 @@ suite('extension manifest', () => {
     assert.ok(manifest.activationEvents?.includes('onStartupFinished'));
   });
 
+  test('activates for conventional variant Playwright config names', () => {
+    assert.ok(manifest.activationEvents?.includes('workspaceContains:**/playwright*.config.ts'));
+  });
+
   test('uses the Playwright CodeLens Runner marketplace identity', () => {
     assert.strictEqual(manifest.name, 'playwright-codelens-runner');
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 3.0 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '3.0.0');
+  test('declares the 3.0.1 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '3.0.1');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });

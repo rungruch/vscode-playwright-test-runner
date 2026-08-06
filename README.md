@@ -79,7 +79,7 @@ Run and Debug delegate to VS Code Testing, so editor actions update the same Mic
 4. Open a `*.spec.*` or `*.test.*` file and use its CodeLens actions.
 5. Optionally run **Playwright: Configure CLI Projects** for Inspector and Playwright UI.
 
-Standard `playwright.config.{js,cjs,mjs,ts,cts,mts}` files are discovered automatically. Explicit configs, custom test patterns, configless workspaces, multi-root workspaces, and nested monorepos are also supported.
+Conventional `playwright*.config.{js,cjs,mjs,ts,cts,mts}` files are discovered automatically, including variants such as `playwright.no-db.config.ts` and `playwright.pdf.config.ts`. For any other filename, list it explicitly in `playwrightCodeLensRunner.configFiles`. Custom test patterns, configless workspaces, multi-root workspaces, and nested monorepos are also supported.
 
 Companion discovery, Inspector, and UI use cwd-relative paths when possible, otherwise absolute paths, then forward-slash-normalize and regex-escape Playwright's positional file filter. This keeps every CLI action reliable for filenames containing spaces or regular-expression metacharacters and for Windows-style paths.
 
@@ -127,7 +127,7 @@ Open the Command Palette and search for **Playwright**:
 - **Open in Playwright UI**
 - **More Playwright Actions…** / **Pick an Exact Generated Case**
 - **Show Playwright Discovery Details** / **Retry Playwright Discovery**
-- **Select CLI Config for File**
+- **Select CLI Config for Current File** — run this from Command Palette (`Cmd+Shift+P`) to choose and remember the companion CLI config for the active file
 - **Rerun Last Run**
 - **Show HTML Report** / **Show Trace**
 - **Record New Test (Codegen)**
@@ -142,7 +142,7 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 
 | Setting | Purpose | Default |
 | --- | --- | --- |
-| `playwrightCodeLensRunner.configFiles` | Explicit discovery/CLI config paths; empty enables automatic discovery | `[]` |
+| `playwrightCodeLensRunner.configFiles` | Explicit discovery/CLI config paths; empty discovers conventional `playwright*.config.*` files | `[]` |
 | `playwrightCodeLensRunner.cli.executable` | Explicit CLI executable such as `npx`, `pnpm`, or a local binary | automatic |
 | `playwrightCodeLensRunner.cli.arguments` | Arguments inserted before the Playwright subcommand | `[]` |
 | `playwrightCodeLensRunner.workingDirectory` | Companion CLI working directory | config directory |

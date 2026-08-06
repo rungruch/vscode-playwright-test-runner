@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -48,12 +48,12 @@
   },
   "activationEvents": [
     "onStartupFinished",
-    "workspaceContains:**/playwright.config.js",
-    "workspaceContains:**/playwright.config.cjs",
-    "workspaceContains:**/playwright.config.mjs",
-    "workspaceContains:**/playwright.config.ts",
-    "workspaceContains:**/playwright.config.cts",
-    "workspaceContains:**/playwright.config.mts",
+    "workspaceContains:**/playwright*.config.js",
+    "workspaceContains:**/playwright*.config.cjs",
+    "workspaceContains:**/playwright*.config.mjs",
+    "workspaceContains:**/playwright*.config.ts",
+    "workspaceContains:**/playwright*.config.cts",
+    "workspaceContains:**/playwright*.config.mts",
     "workspaceContains:**/*.spec.js",
     "workspaceContains:**/*.spec.ts",
     "workspaceContains:**/*.spec.tsx",
@@ -83,7 +83,7 @@
               "type": "string"
             },
             "default": [],
-            "markdownDescription": "Playwright config files to use, relative to a workspace folder or absolute. Supports `${workspaceFolder}`, `${packageRoot}` and `${configDir}` variables. When empty, configs are discovered automatically in every workspace folder.",
+            "markdownDescription": "Playwright config files to use, relative to a workspace folder or absolute. Supports `${workspaceFolder}`, `${packageRoot}` and `${configDir}` variables. When empty, conventional `playwright*.config.*` files are discovered automatically in every workspace folder.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.cli.executable": {
@@ -334,7 +334,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.selectConfig",
-        "title": "Select CLI Config for File",
+        "title": "Select CLI Config for Current File",
         "category": "Playwright"
       }
     ],

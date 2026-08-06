@@ -84,6 +84,26 @@ suite('Playwright CodeLens Runner extension', () => {
     assert.ok([...titles].some((title) => title?.startsWith('$(settings-gear) CLI Config: ')));
   });
 
+  test('automatically discovers and selects a conventional variant config', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'no-db-only.spec.ts');
+    await vscode.workspace.openTextDocument(uri);
+    await api.discovery.refreshAll();
+
+    const target = api.discovery.currentTargets.find((candidate) => (
+      candidate.configFile?.endsWith('playwright.no-db.config.ts')
+    ));
+    assert.ok(target, 'the no-database variant config is discovered automatically');
+
+    const resolved = await api.discovery.resolveTargetForFile(uri.fsPath, { prompt: false });
+    assert.strictEqual(resolved?.id, target.id, 'the variant config owns its matching test');
+
+    const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
+    const titles = new Set((lenses ?? []).map((lens) => lens.command?.title));
+    assert.ok(titles.has('$(play) Run File'));
+    assert.ok(titles.has('$(play) Run Test'));
+    assert.ok([...titles].some((title) => title?.endsWith('CLI Config: playwright.no-db.config.ts')));
+  });
+
   test('provides full, compact, and custom CodeLens layouts', async () => {
     const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'example.spec.ts');
     const document = await vscode.workspace.openTextDocument(uri);
@@ -305,6 +325,34 @@ suite('Playwright CodeLens Runner extension', () => {
       } catch {
         // The file may not have been created if the assertion failed early.
       }
+    }
+  });
+
+  test('refreshes a conventional variant config after an external-style change', async () => {
+    const configUri = vscode.Uri.joinPath(fixture.uri, 'playwright.no-db.config.ts');
+    const original = Buffer.from(await vscode.workspace.fs.readFile(configUri)).toString('utf8');
+    await api.discovery.refreshTargets();
+    const target = api.discovery.currentTargets.find((candidate) => (
+      candidate.configFile === configUri.fsPath
+    ));
+    assert.ok(target, 'the variant config is an active discovery target');
+    await api.discovery.discover(target, undefined, true);
+    const before = api.discovery.diagnosticsFor(target.id)?.startedAt ?? 0;
+    const marker = `variant-config-watcher-${Date.now()}`;
+
+    try {
+      await vscode.workspace.fs.writeFile(configUri, Buffer.from(`${original}\n// ${marker}\n`));
+      await waitUntil(
+        'variant config watcher to rescan and refresh its target',
+        () => (api.discovery.diagnosticsFor(target.id)?.startedAt ?? 0) > before,
+      );
+    } finally {
+      const beforeRestore = api.discovery.diagnosticsFor(target.id)?.startedAt ?? 0;
+      await vscode.workspace.fs.writeFile(configUri, Buffer.from(original));
+      await waitUntil(
+        'variant config watcher to refresh after restoring the fixture',
+        () => (api.discovery.diagnosticsFor(target.id)?.startedAt ?? 0) > beforeRestore,
+      );
     }
   });
 
