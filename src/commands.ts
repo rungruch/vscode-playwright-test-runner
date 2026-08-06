@@ -5,6 +5,7 @@ import { CompanionCliRunner } from './companionRunner';
 import { ArtifactRecord, CompanionFailure, CompanionRunSummary, UiProfile } from './core/companionTypes';
 import { ForcedInspectorBrowser, resolveInspectorBrowser } from './core/inspectorBrowser';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
+import { buildShowReportArguments } from './core/reportServer';
 import {
   buildChangedUiArguments,
   buildCompanionTestArguments,
@@ -588,7 +589,7 @@ async function openArtifactCommand(deps: CommandDeps, artifact: ArtifactRecord):
     return;
   }
   if (artifact.kind === 'report' || artifact.kind === 'report-zip') {
-    runInTerminal(target, 'Playwright Report', ['show-report', artifact.path]);
+    runInTerminal(target, 'Playwright Report', buildShowReportArguments(artifact.path));
   } else if (artifact.kind === 'trace') {
     runInTerminal(target, 'Playwright Trace', ['show-trace', artifact.path]);
   } else {
@@ -805,7 +806,7 @@ function scheduleNativeFocus(file: string): void {
 async function showReportCommand(deps: CommandDeps): Promise<void> {
   const target = await pickTarget(deps, 'Show HTML report for which Playwright config?');
   if (target) {
-    runInTerminal(target, 'Playwright Report', ['show-report']);
+    runInTerminal(target, 'Playwright Report', buildShowReportArguments());
   }
 }
 
