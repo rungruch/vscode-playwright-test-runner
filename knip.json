@@ -1,0 +1,25 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/test/**/*.test.ts",
+    ".vscode-test.mjs",
+    "scripts/*.mjs",
+    "fixtures/basic/playwright.config.ts",
+    "fixtures/basic/tests/**/*.spec.ts",
+    "fixtures/multipkg/*/playwright.config.ts",
+    "fixtures/multipkg/*/tests/**/*.spec.ts",
+    "fixtures/pw138/playwright.config.ts",
+    "fixtures/pw138/tests/**/*.spec.ts"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "*.mjs",
+    "scripts/**/*.mjs",
+    "fixtures/**/playwright.config.ts",
+    "fixtures/**/tests/**/*.spec.ts"
+  ],
+  "ignoreDependencies": [
+    "@playwright/test",
+    "@vscode/test-electron"
+  ]
+}

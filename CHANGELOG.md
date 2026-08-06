@@ -1,5 +1,42 @@
 # Change Log
 
+## 2.1.0 - 2026-08-06
+
+- Released version 2.1 as a clean break from the original v1 runner.
+- Renamed every command, setting, configuration listener, and persisted project key from `playwrightCliRunner.*` to `playwrightCodeLensRunner.*`. The marketplace identity remains `rungruch.playwright-codelens-runner`; no old aliases or state migration are provided.
+- Removed all v1 compatibility: legacy command aliases and argument normalization, `playwrightrunner.*` setting fallbacks and the migration command, legacy variable aliases such as `${workspaceRoot}` and `${currentFile}`, and obsolete project-picker seeding.
+- Removed stale repository content: old launch and task definitions tied to retired build tooling and the legacy scratch fixture; obsolete extension recommendations and ignored-state entries; unused basic-fixture specs; and the internal 2.0 rewrite diary. Pruned unused JSON-report model fields while retaining the active discovery parser.
+- Raised requirements to VS Code `^1.125.0` on the extension host and Node.js `>=22.13.0` for contributors (Node.js 24 LTS recommended).
+- Adopted TypeScript 7 as the primary compiler using Microsoft's documented side-by-side arrangement: `@typescript/native` aliases `typescript@^7.0.2` for `tsc`, while `typescript` aliases `@typescript/typescript6@^6.0.2` for compiler-API consumers and `tsc6`. Added `typecheck` (TypeScript 7) and `typecheck:ts6` (temporary parity) commands, explicit `node` and `mocha` types, `moduleResolution: "Bundler"`, and stable type ordering, while preserving CommonJS/ES2022 output for extension-runtime stability.
+- Converted the build, test-host, and cleanup scripts to ESM and pointed launch configurations at the active basic fixture.
+- Recommended ESLint and Microsoft's native TypeScript preview extension, configured for the local TypeScript 7 compiler.
+- Losslessly resized the marketplace icon to 256×256 to satisfy VS Code guidance without changing its design.
+- Applied stable dependency updates: VS Code types `1.125.0`, `@vscode/test-cli` `0.0.15`, `@vscode/test-electron` `3.1.0`, `@vscode/vsce` `3.9.2`, ESLint `10.8`, typescript-eslint `8.66`, esbuild `0.28`, Mocha `11.8`, and Knip `6.31`. Added `@eslint/js` as a direct dependency. Kept `@types/node` on 22 so declarations match the VS Code extension runtime.
+- Updated maintained Playwright fixtures to `1.62.1`; kept the compatibility fixture pinned to `1.38.0`.
+- Added permanent quality commands: zero-warning ESLint and `check:unused` via Knip with explicit extension, test, script, and fixture entries.
+- Extension export remains `{ discovery, projects, bridge }`.
+- Expanded the extension-host test matrix: full basic fixture on the earliest tested VS Code 1.125 patch (`1.125.1`) and current stable `1.132.0`, a Playwright `1.38.0` compatibility smoke test on that earliest tested host, and an automated multi-root test covering both nested configurations and their CodeLens discovery. The official Playwright extension remains pinned at `1.1.19` in tests.
+
+## 2.0.0 - 2026-08-05
+
+- Rebranded the independent 2.0 rewrite as **Playwright CodeLens Runner** with the marketplace identity `rungruch.playwright-codelens-runner`.
+- Reworked the extension into a required CodeLens companion for `ms-playwright.playwright`.
+- Delegated editor Run and Debug actions to VS Code Testing so Microsoft remains the sole TestController and owns status, output, duration, and debugging.
+- Added default CodeLens actions for files, nested `test.describe` suites, top-level tests, and duplicate titles.
+- Added exact file-, suite-, and test-scoped Playwright UI and Inspector CLI operations with separately persisted CLI project selection.
+- Added multiple-config, multi-root workspace, monorepo, config, working-directory, environment, and extra-option support for discovery and companion CLI tools.
+- Retained HTML report, trace, codegen, refresh, rerun, and settings migration commands; added a command to open Microsoft Playwright settings.
+- Removed the duplicate runner, TestController, live reporter, JSON report import, snapshot workflow, additional reporters, and Testing-item context contributions.
+- Changed the extension API to expose `{ discovery, projects, bridge }`.
+- Added the `playwrightCliRunner.*` settings namespace and assisted migration from `playwrightrunner.*`.
+- Raised requirements to VS Code 1.93, Node.js 20, and Playwright Test 1.38.
+- Fixed Inspector, UI, report, trace, and codegen terminals launching the VS Code Electron helper without Node mode on macOS.
+- Fixed Inspector/UI title filters for Playwright's project/file prefix, title separators, and trailing tags.
+- Collapsed loop-generated and data-driven tests at one source declaration into a single CodeLens group, with Inspector/UI scoped by `file:line`.
+- Placed CLI file filters before variadic project options so scoped Inspector/UI commands cannot be consumed as project names.
+- Added an Inspector-only browser setting that defaults to config behavior and can force a matching Chromium, Firefox, or WebKit project.
+- Fixed stale targets after settings changes, nested config routing, config creation/deletion, unsupported-version upgrades, duplicated project CodeLens entries, stale CLI projects, empty-setting precedence, custom-layout activation, and legacy string arguments.
+
 ## 1.4.1 - 2023-07-07
 
 - Fix: #17 Fixed incorrect parsing of environment variables.

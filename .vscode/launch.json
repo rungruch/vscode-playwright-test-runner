@@ -1,4 +1,3 @@
-// A launch configuration that compiles the extension and then opens it inside a new window
 {
     "version": "0.2.0",
     "configurations": [
@@ -7,28 +6,39 @@
             "type": "extensionHost",
             "request": "launch",
             "args": [
-                "${workspaceFolder}/testarea",
+                "${workspaceFolder}/fixtures/basic",
                 "--extensionDevelopmentPath=${workspaceFolder}"
             ],
-			"outFiles": [
-				"${workspaceFolder}/dist/**/*.js"
-			],
+            "outFiles": [
+                "${workspaceFolder}/dist/**/*.cjs"
+            ],
+            "preLaunchTask": "${defaultBuildTask}"
+        },
+        {
+            "name": "Run Extension (multi-root)",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "${workspaceFolder}/fixtures/multipkg/multi-root.code-workspace",
+                "--extensionDevelopmentPath=${workspaceFolder}"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/dist/**/*.cjs"
+            ],
             "preLaunchTask": "${defaultBuildTask}"
         },
         {
             "name": "Extension Tests",
             "type": "extensionHost",
             "request": "launch",
+            "testConfiguration": "${workspaceFolder}/.vscode-test.mjs",
             "args": [
-                "${workspaceFolder}/testarea",
-                "--extensionDevelopmentPath=${workspaceFolder}",
-                "--extensionTestsPath=${workspaceFolder}/out/test/suite/index"
+                "--extensionDevelopmentPath=${workspaceFolder}"
             ],
-			"outFiles": [
-				"${workspaceFolder}/dist/**/*.js",
-				"${workspaceFolder}/out/test/**/*.js"
-			],
-            "preLaunchTask": "npm: test-watch"
+            "outFiles": [
+                "${workspaceFolder}/out/test/**/*.js"
+            ],
+            "preLaunchTask": "Build Extension Tests"
         }
     ]
 }
