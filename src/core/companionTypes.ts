@@ -43,6 +43,7 @@ export interface CompanionRunSummary {
   args: string[];
   selection: RunSelection;
   projects: string[];
+  currentTest?: string;
   output?: string;
 }
 

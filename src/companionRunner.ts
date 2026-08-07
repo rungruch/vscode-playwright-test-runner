@@ -61,6 +61,12 @@ export class CompanionCliRunner implements vscode.Disposable {
     const append = (text: string) => {
       collectedOutput = trimOutput(`${collectedOutput}${text}`);
       this.output.append(text);
+      const currentTest = extractRunningTestTitle(text);
+      if (currentTest && currentTest !== summary.currentTest) {
+        summary = { ...summary, currentTest, durationMs: Date.now() - startedAt };
+        this.latest = summary;
+        this.emitter.fire(summary);
+      }
     };
     try {
       tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'playwright-codelens-run-'));
@@ -155,4 +161,22 @@ async function readResult(file: string): Promise<string | undefined> {
 
 function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
+}
+
+function extractRunningTestTitle(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) {
+      continue;
+    }
+    const match = /\[[^\]]+\]\s+›\s+(.+)$/.exec(line);
+    if (match) {
+      const raw = match[1].replace(/^[^:]+:\d+:\d+\s+›\s+/, '').trim();
+      if (raw) {
+        return raw;
+      }
+    }
+  }
+  return undefined;
 }

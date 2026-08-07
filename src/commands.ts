@@ -370,6 +370,7 @@ async function flakeLabCommand(
     trace: settings.flakeLabTrace,
     failOnFlakyTests: settings.flakeLabFailOnFlakyTests,
   });
+  void focusCompanionFor(target);
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -388,7 +389,6 @@ async function flakeLabCommand(
     }, token),
   );
   await deps.sidebar.refreshArtifacts(await currentTargets(deps));
-  await focusCompanionFor(target);
 }
 
 async function companionRunCommand(
@@ -418,6 +418,7 @@ async function companionRunCommand(
     }),
     ...target.runOptions,
   ];
+  void focusCompanionFor(target);
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -436,7 +437,6 @@ async function companionRunCommand(
     }, token),
   );
   await deps.sidebar.refreshArtifacts(await currentTargets(deps));
-  await focusCompanionFor(target);
 }
 
 async function changedUiCommand(deps: CommandDeps, selection: EditorTestSelection | undefined): Promise<void> {
@@ -571,6 +571,7 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     }),
     ...target.runOptions,
   ];
+  void focusCompanionFor(target);
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -589,7 +590,6 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     }, token),
   );
   await deps.sidebar.refreshArtifacts(await currentTargets(deps));
-  await focusCompanionFor(target);
 }
 
 async function artifactCenterCommand(deps: CommandDeps): Promise<void> {
@@ -841,6 +841,7 @@ async function focusCompanionFor(target: RunTarget): Promise<void> {
 
 async function focusCompanionView(): Promise<void> {
   await vscode.commands.executeCommand('workbench.view.extension.playwrightCodeLensRunner');
+  await vscode.commands.executeCommand('playwrightCodeLensRunner.runsView.focus').then(undefined, () => undefined);
 }
 
 async function focusNativeResults(file: string | undefined): Promise<void> {
