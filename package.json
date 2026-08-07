@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.1.0",
+  "version": "3.1.1",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
