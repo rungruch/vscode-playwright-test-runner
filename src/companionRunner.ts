@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { extractRunningTestTitle, parseCompanionJsonReport, withParsedReport } from './core/companionReport';
+import { extractRunningTestTitle, isTitleMatch, parseCompanionJsonReport, withParsedReport } from './core/companionReport';
 import { CompanionCliRunRequest, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
@@ -172,27 +172,6 @@ async function readResult(file: string): Promise<string | undefined> {
 
 function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
-}
-
-function stripTags(title: string): string {
-  return title.replace(/(?:\s+@\S+)+$/g, '').trim();
-}
-
-function isTitleMatch(a: string, b: string): boolean {
-  if (a === b) {
-    return true;
-  }
-  const cleanA = stripTags(a);
-  const cleanB = stripTags(b);
-  if (cleanA === cleanB) {
-    return true;
-  }
-  return (
-    cleanB.endsWith(` › ${cleanA}`)
-    || cleanA.endsWith(` › ${cleanB}`)
-    || cleanB.endsWith(` ${cleanA}`)
-    || cleanA.endsWith(` ${cleanB}`)
-  );
 }
 
 function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): CompanionTestItem[] {

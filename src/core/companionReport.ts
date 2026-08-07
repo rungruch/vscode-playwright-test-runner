@@ -79,6 +79,17 @@ export function withParsedReport(
   if (!parsed) {
     return run;
   }
+  const mergedTests = run.tests ? run.tests.map((t) => ({ ...t })) : [];
+  if (parsed.tests.length > 0) {
+    for (const parsedTest of parsed.tests) {
+      const idx = mergedTests.findIndex((t) => isTitleMatch(t.title, parsedTest.title));
+      if (idx >= 0) {
+        mergedTests[idx] = { ...mergedTests[idx], ...parsedTest };
+      } else {
+        mergedTests.push(parsedTest);
+      }
+    }
+  }
   return {
     ...run,
     total: parsed.total,
@@ -88,8 +99,29 @@ export function withParsedReport(
     flaky: parsed.flaky,
     durationMs: Math.max(run.durationMs, parsed.durationMs),
     failures: parsed.failures,
-    tests: parsed.tests.length > 0 ? parsed.tests : run.tests,
+    tests: mergedTests.length > 0 ? mergedTests : run.tests,
   };
+}
+
+function stripTags(title: string): string {
+  return title.replace(/(?:\s+@\S+)+$/g, '').trim();
+}
+
+export function isTitleMatch(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  const cleanA = stripTags(a);
+  const cleanB = stripTags(b);
+  if (cleanA === cleanB) {
+    return true;
+  }
+  return (
+    cleanB.endsWith(` › ${cleanA}`)
+    || cleanA.endsWith(` › ${cleanB}`)
+    || cleanB.endsWith(` ${cleanA}`)
+    || cleanA.endsWith(` ${cleanB}`)
+  );
 }
 
 function visitSuite(
