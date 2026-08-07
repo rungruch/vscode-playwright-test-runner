@@ -136,13 +136,9 @@ export class PlaywrightSidebar implements vscode.Disposable {
       const item = new vscode.TreeItem(test.title, vscode.TreeItemCollapsibleState.None);
       item.description = test.status === 'running'
         ? 'running'
-        : test.status === 'passed'
-          ? formatDuration(test.durationMs ?? 0)
-          : test.status === 'failed'
-            ? 'failed'
-            : test.status === 'skipped'
-              ? 'skipped'
-              : 'pending';
+        : test.durationMs !== undefined && test.durationMs > 0
+          ? formatDuration(test.durationMs)
+          : test.status;
       const icon = test.status === 'running'
         ? 'sync~spin'
         : test.status === 'passed'

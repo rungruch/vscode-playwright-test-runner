@@ -126,7 +126,8 @@ function visitSpec(
       continue;
     }
     summary.total++;
-    summary.durationMs += results.reduce((duration, result) => duration + (result.duration ?? 0), 0);
+    const totalDuration = results.reduce((duration, result) => duration + (result.duration ?? 0), 0);
+    summary.durationMs += totalDuration;
     const final = results[results.length - 1];
     const statuses = results.map((result) => result.status ?? 'unknown');
     const recovered = final.status === 'passed' && statuses.slice(0, -1).some((status) => isFailure(status));
@@ -134,7 +135,6 @@ function visitSpec(
       summary.flaky++;
     }
     const testTitle = titlePath.join(' › ') || 'Unnamed Playwright test';
-    const totalDuration = results.reduce((duration, result) => duration + (result.duration ?? 0), 0);
     const testStatus: CompanionTestStatus = final.status === 'passed' ? 'passed' : final.status === 'skipped' ? 'skipped' : 'failed';
     summary.tests.push({
       id: `${file ?? ''}:${line ?? 1}:${testTitle}`,

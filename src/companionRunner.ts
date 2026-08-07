@@ -95,6 +95,9 @@ export class CompanionCliRunner implements vscode.Disposable {
       const outcome = await running.outcome;
       const report = await readResult(resultFile) ?? collectedOutput;
       summary = withParsedReport(summary, parseCompanionJsonReport(report));
+      if (outcome.cancelled && summary.tests) {
+        summary.tests = summary.tests.map((t) => (t.status === 'running' ? { ...t, status: 'pending' as const } : t));
+      }
       summary = {
         ...summary,
         durationMs: Math.max(summary.durationMs, Date.now() - startedAt),
@@ -180,7 +183,11 @@ function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): C
   }
   let matched = false;
   for (const t of result) {
-    if (t.title === runningTitle || runningTitle.endsWith(t.title) || t.title.endsWith(runningTitle)) {
+    if (
+      t.title === runningTitle
+      || runningTitle.endsWith(` › ${t.title}`)
+      || t.title.endsWith(` › ${runningTitle}`)
+    ) {
       t.status = 'running';
       matched = true;
       break;

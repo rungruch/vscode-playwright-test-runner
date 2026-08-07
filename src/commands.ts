@@ -1090,7 +1090,7 @@ async function initialTestsForSelection(
         title,
         file: s.file,
         line,
-        status: 'pending',
+        status: 'pending' as const,
       };
     });
   } catch {
@@ -1107,8 +1107,7 @@ function isSelectionMatch(candidate: EditorTestSelection, target: EditorTestSele
       || Boolean(candidate.titlePath && target.titlePath && candidate.titlePath.join(' › ') === target.titlePath.join(' › '));
   }
   if (target.kind === 'suite' && candidate.titlePath && target.titlePath) {
-    const targetPrefix = target.titlePath.join(' › ');
-    return candidate.titlePath.join(' › ').startsWith(targetPrefix);
+    return target.titlePath.every((seg, i) => candidate.titlePath?.[i] === seg);
   }
   return true;
 }
