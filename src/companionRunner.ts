@@ -174,6 +174,27 @@ function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
 }
 
+function stripTags(title: string): string {
+  return title.replace(/(?:\s+@\S+)+$/g, '').trim();
+}
+
+function isTitleMatch(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  const cleanA = stripTags(a);
+  const cleanB = stripTags(b);
+  if (cleanA === cleanB) {
+    return true;
+  }
+  return (
+    cleanB.endsWith(` › ${cleanA}`)
+    || cleanA.endsWith(` › ${cleanB}`)
+    || cleanB.endsWith(` ${cleanA}`)
+    || cleanA.endsWith(` ${cleanB}`)
+  );
+}
+
 function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): CompanionTestItem[] {
   const result: CompanionTestItem[] = tests.map((t) => ({ ...t }));
   for (const t of result) {
@@ -183,12 +204,9 @@ function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): C
   }
   let matched = false;
   for (const t of result) {
-    if (
-      t.title === runningTitle
-      || runningTitle.endsWith(` › ${t.title}`)
-      || t.title.endsWith(` › ${runningTitle}`)
-    ) {
+    if (isTitleMatch(t.title, runningTitle)) {
       t.status = 'running';
+      t.title = runningTitle;
       matched = true;
       break;
     }
