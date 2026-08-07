@@ -99,6 +99,7 @@ suite('extension manifest', () => {
     const commands = new Set((manifest.contributes?.commands ?? []).map((entry) => entry.command));
     for (const command of [
       'playwrightCodeLensRunner.flakeLab',
+      'playwrightCodeLensRunner.runCompanion',
       'playwrightCodeLensRunner.openChangedUi',
       'playwrightCodeLensRunner.openLastFailedUi',
       'playwrightCodeLensRunner.tagActions',

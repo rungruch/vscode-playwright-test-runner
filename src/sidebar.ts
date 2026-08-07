@@ -101,7 +101,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
     if (element.type === 'run') {
       const run = element.run;
       const item = new vscode.TreeItem(
-        `Latest ${run.kind === 'flake-lab' ? 'Flake Lab' : 'failed-test rerun'}`,
+        `Latest ${run.kind === 'flake-lab' ? 'Flake Lab' : run.kind === 'companion-run' ? 'Companion run' : 'failed-test rerun'}`,
         run.failures.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
       );
       item.description = `${run.status} · ${formatDuration(run.durationMs)}`;

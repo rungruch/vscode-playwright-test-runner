@@ -67,6 +67,7 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.selectConfig', (selection?: EditorTestSelection) => selectConfigCommand(deps, selection));
 
   register('playwrightCodeLensRunner.flakeLab', (selection?: EditorTestSelection | vscode.Uri) => flakeLabCommand(deps, selection));
+  register('playwrightCodeLensRunner.runCompanion', (selection?: EditorTestSelection | vscode.Uri) => companionRunCommand(deps, selection));
   register('playwrightCodeLensRunner.openChangedUi', (selection?: EditorTestSelection) => changedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.openLastFailedUi', (selection?: EditorTestSelection) => lastFailedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.tagActions', (selection?: EditorTestSelection) => tagActionsCommand(deps, selection));
@@ -186,9 +187,11 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     void vscode.window.showInformationMessage('No Playwright selection found at the current position.');
     return;
   }
+  const scopeLabel = resolved.kind === 'file' ? 'File' : resolved.kind === 'suite' ? 'Suite' : 'Test';
   const choices = [
     { label: '$(play) Run', description: 'Microsoft Testing', action: 'run' as const },
     { label: '$(debug) Debug', description: 'Microsoft Testing', action: 'debug' as const },
+    { label: `$(play) Run Companion ${scopeLabel}`, description: 'Companion CLI · normal run', action: 'companionRun' as const },
     ...(resolved.kind === 'file' ? [] : [{ label: '$(eye) Inspect', description: 'Companion CLI', action: 'inspect' as const }]),
     { label: '$(browser) Playwright UI', description: 'Companion CLI', action: 'ui' as const },
     { label: '$(beaker) Flake Lab', description: 'Companion CLI · repeat selected scope', action: 'flake' as const },
@@ -210,6 +213,8 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     await delegatedTestCommand(deps, resolved, 'run');
   } else if (picked.action === 'debug') {
     await delegatedTestCommand(deps, resolved, 'debug');
+  } else if (picked.action === 'companionRun') {
+    await companionRunCommand(deps, resolved);
   } else if (picked.action === 'inspect') {
     await interactiveCliCommand(deps, resolved, 'debug');
   } else if (picked.action === 'ui') {
@@ -373,6 +378,54 @@ async function flakeLabCommand(
     },
     async (_progress, token) => deps.runner.run(target, {
       kind: 'flake-lab',
+      targetId: target.id,
+      cwd: target.cwd,
+      configFile: target.configFile,
+      args,
+      env: target.env,
+      selection: runSelection,
+      projects,
+    }, token),
+  );
+  await deps.sidebar.refreshArtifacts(await currentTargets(deps));
+  await focusCompanionFor(target);
+}
+
+async function companionRunCommand(
+  deps: CommandDeps,
+  arg: EditorTestSelection | vscode.Uri | undefined,
+): Promise<void> {
+  const selection = isEditorSelection(arg)
+    ? arg
+    : isUri(arg)
+      ? await fileSelectionForUri(deps, arg)
+      : await selectionAtCursor(deps);
+  if (!selection) {
+    void vscode.window.showInformationMessage('Open a Playwright test file first.');
+    return;
+  }
+  const target = await targetForSelection(deps, selection);
+  if (!target) {
+    return;
+  }
+  const projects = await deps.projects.getProjects(target);
+  const runSelection = cliSelectionForEditor(selection);
+  const args = [
+    ...buildCompanionTestArguments(runSelection, {
+      configFile: target.configFile,
+      cwd: target.cwd,
+      projects,
+    }),
+    ...target.runOptions,
+  ];
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `Playwright Companion Run: ${path.basename(selection.file)}`,
+      cancellable: true,
+    },
+    async (_progress, token) => deps.runner.run(target, {
+      kind: 'companion-run',
       targetId: target.id,
       cwd: target.cwd,
       configFile: target.configFile,

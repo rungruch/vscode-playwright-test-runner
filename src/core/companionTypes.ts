@@ -2,7 +2,7 @@ import { RunSelection } from './runArguments';
 
 /** A structured, extension-owned CLI invocation. */
 export interface CompanionCliRunRequest {
-  kind: 'flake-lab' | 'rerun-failed';
+  kind: 'flake-lab' | 'rerun-failed' | 'companion-run';
   targetId: string;
   cwd: string;
   configFile?: string;

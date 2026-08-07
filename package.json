@@ -428,6 +428,11 @@
         "category": "Playwright"
       },
       {
+        "command": "playwrightCodeLensRunner.runCompanion",
+        "title": "Run Companion Test (Normal CLI Run)",
+        "category": "Playwright"
+      },
+      {
         "command": "playwrightCodeLensRunner.openRunsView",
         "title": "Open Playwright Runs",
         "category": "Playwright"
