@@ -34,6 +34,16 @@ suite('companionReport', () => {
     assert.strictEqual(parsed.failures[0].file, '/ws/tests/example.spec.ts');
     assert.strictEqual(parsed.failures[0].line, 14);
     assert.match(parsed.failures[0].message ?? '', /expected true/);
+    assert.strictEqual(parsed.tests.length, 4);
+    assert.deepStrictEqual(
+      parsed.tests.map((t) => ({ title: t.title, status: t.status })),
+      [
+        { title: 'tests/example.spec.ts › stable', status: 'passed' },
+        { title: 'tests/example.spec.ts › recovers', status: 'passed' },
+        { title: 'tests/example.spec.ts › breaks', status: 'failed' },
+        { title: 'tests/example.spec.ts › skips', status: 'skipped' },
+      ],
+    );
   });
 
   test('tolerates malformed or incomplete output', () => {
@@ -46,6 +56,7 @@ suite('companionReport', () => {
       flaky: 0,
       durationMs: 0,
       failures: [],
+      tests: [],
     });
   });
 });

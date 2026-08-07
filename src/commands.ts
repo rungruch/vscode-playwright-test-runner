@@ -2,7 +2,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
-import { ArtifactRecord, CompanionFailure, CompanionRunSummary, UiProfile } from './core/companionTypes';
+import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem, UiProfile } from './core/companionTypes';
 import { ForcedInspectorBrowser, resolveInspectorBrowser } from './core/inspectorBrowser';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import { buildShowReportArguments } from './core/reportServer';
@@ -370,6 +370,7 @@ async function flakeLabCommand(
     trace: settings.flakeLabTrace,
     failOnFlakyTests: settings.flakeLabFailOnFlakyTests,
   });
+  const initialTests = await initialTestsForSelection(deps, target, selection);
   void focusCompanionFor(target);
   await vscode.window.withProgress(
     {
@@ -386,6 +387,7 @@ async function flakeLabCommand(
       env: target.env,
       selection: runSelection,
       projects,
+      initialTests,
     }, token),
   );
   await deps.sidebar.refreshArtifacts(await currentTargets(deps));
@@ -418,6 +420,7 @@ async function companionRunCommand(
     }),
     ...target.runOptions,
   ];
+  const initialTests = await initialTestsForSelection(deps, target, selection);
   void focusCompanionFor(target);
   await vscode.window.withProgress(
     {
@@ -434,6 +437,7 @@ async function companionRunCommand(
       env: target.env,
       selection: runSelection,
       projects,
+      initialTests,
     }, token),
   );
   await deps.sidebar.refreshArtifacts(await currentTargets(deps));
@@ -571,6 +575,13 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     }),
     ...target.runOptions,
   ];
+  const initialTests = latest.failures.map((f) => ({
+    id: `${f.file ?? ''}:${f.line ?? 1}:${f.title}`,
+    title: f.title,
+    file: f.file,
+    line: f.line,
+    status: 'pending' as const,
+  }));
   void focusCompanionFor(target);
   await vscode.window.withProgress(
     {
@@ -587,6 +598,7 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
       env: target.env,
       selection,
       projects,
+      initialTests,
     }, token),
   );
   await deps.sidebar.refreshArtifacts(await currentTargets(deps));
@@ -1052,4 +1064,51 @@ function isUri(value: EditorTestSelection | vscode.Uri | undefined): value is vs
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function initialTestsForSelection(
+  deps: CommandDeps,
+  target: RunTarget,
+  selection: EditorTestSelection,
+): Promise<CompanionTestItem[] | undefined> {
+  try {
+    const model = await deps.discovery.discoverForFile(target, selection.file);
+    if (!model) {
+      return undefined;
+    }
+    const uri = selection.uri ?? vscode.Uri.file(selection.file).toString();
+    const selections = editorSelectionsForFile(model, selection.file, uri).filter((s) => s.kind === 'test');
+    const matched = selection.kind === 'file'
+      ? selections
+      : selections.filter((s) => isSelectionMatch(s, selection));
+    const targetSpecs = matched.length > 0 ? matched : selections;
+    return targetSpecs.map((s) => {
+      const title = s.titlePath ? s.titlePath.join(' › ') : s.fullTitle ?? 'Playwright test';
+      const line = s.position.line + 1;
+      return {
+        id: `${s.file}:${line}:${title}`,
+        title,
+        file: s.file,
+        line,
+        status: 'pending',
+      };
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function isSelectionMatch(candidate: EditorTestSelection, target: EditorTestSelection): boolean {
+  if (candidate.file !== target.file) {
+    return false;
+  }
+  if (target.kind === 'test') {
+    return candidate.position.line === target.position.line
+      || Boolean(candidate.titlePath && target.titlePath && candidate.titlePath.join(' › ') === target.titlePath.join(' › '));
+  }
+  if (target.kind === 'suite' && candidate.titlePath && target.titlePath) {
+    const targetPrefix = target.titlePath.join(' › ');
+    return candidate.titlePath.join(' › ').startsWith(targetPrefix);
+  }
+  return true;
 }

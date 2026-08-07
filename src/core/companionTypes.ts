@@ -1,5 +1,17 @@
 import { RunSelection } from './runArguments';
 
+export type CompanionTestStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+
+export interface CompanionTestItem {
+  id: string;
+  title: string;
+  file?: string;
+  line?: number;
+  status: CompanionTestStatus;
+  durationMs?: number;
+  message?: string;
+}
+
 /** A structured, extension-owned CLI invocation. */
 export interface CompanionCliRunRequest {
   kind: 'flake-lab' | 'rerun-failed' | 'companion-run';
@@ -12,6 +24,7 @@ export interface CompanionCliRunRequest {
   selection: RunSelection;
   projects: string[];
   startedAt?: number;
+  initialTests?: CompanionTestItem[];
 }
 
 type CompanionRunStatus = 'running' | 'passed' | 'failed' | 'cancelled' | 'incomplete';
@@ -44,6 +57,7 @@ export interface CompanionRunSummary {
   selection: RunSelection;
   projects: string[];
   currentTest?: string;
+  tests?: CompanionTestItem[];
   output?: string;
 }
 

@@ -2,12 +2,13 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
-import { ArtifactRecord, CompanionFailure, CompanionRunSummary } from './core/companionTypes';
+import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { InteractiveSession, InteractiveSessionManager } from './interactiveSessions';
 import { RunTarget } from './runTarget';
 
 type RunElement =
   | { type: 'run'; run: CompanionRunSummary }
+  | { type: 'testCase'; test: CompanionTestItem }
   | { type: 'failure'; failure: CompanionFailure }
   | { type: 'session'; session: InteractiveSession }
   | { type: 'action'; label: string; command: string; icon: string };
@@ -81,21 +82,15 @@ export class PlaywrightSidebar implements vscode.Disposable {
     if (element.type === 'run') {
       const run = element.run;
       const totals: RunElement[] = [];
-      if (run.status === 'running' && run.currentTest) {
-        totals.push({
-          type: 'action',
-          label: `Running: ${run.currentTest}`,
-          command: 'playwrightCodeLensRunner.showCompanionOutput',
-          icon: 'sync~spin',
-        });
-      }
       totals.push({
         type: 'action',
         label: `Total ${run.total} · Passed ${run.passed} · Failed ${run.failed} · Skipped ${run.skipped} · Flaky ${run.flaky}`,
         command: 'playwrightCodeLensRunner.openRunsView',
         icon: run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error',
       });
-      if (run.failures.length > 0) {
+      if (run.tests && run.tests.length > 0) {
+        totals.push(...run.tests.map((test) => ({ type: 'testCase' as const, test })));
+      } else if (run.failures.length > 0) {
         totals.push(...run.failures.map((failure) => ({ type: 'failure' as const, failure })));
       }
       if (run.failed > 0) {
@@ -112,7 +107,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
       const kindLabel = run.kind === 'flake-lab' ? 'Flake Lab' : run.kind === 'companion-run' ? 'Companion run' : 'failed-test rerun';
       const targetFile = run.selection?.files?.[0];
       const fileBasename = targetFile ? ` (${path.basename(targetFile)})` : '';
-      const isExpanded = run.failures.length > 0 || run.status === 'running';
+      const isExpanded = Boolean((run.tests && run.tests.length > 0) || run.failures.length > 0 || run.status === 'running');
       const item = new vscode.TreeItem(
         `Latest ${kindLabel}${fileBasename}`,
         isExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
@@ -134,6 +129,48 @@ export class PlaywrightSidebar implements vscode.Disposable {
       );
       item.iconPath = new vscode.ThemeIcon(run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error');
       item.contextValue = 'playwrightCompanionRun';
+      return item;
+    }
+    if (element.type === 'testCase') {
+      const test = element.test;
+      const item = new vscode.TreeItem(test.title, vscode.TreeItemCollapsibleState.None);
+      item.description = test.status === 'running'
+        ? 'running'
+        : test.status === 'passed'
+          ? formatDuration(test.durationMs ?? 0)
+          : test.status === 'failed'
+            ? 'failed'
+            : test.status === 'skipped'
+              ? 'skipped'
+              : 'pending';
+      const icon = test.status === 'running'
+        ? 'sync~spin'
+        : test.status === 'passed'
+          ? 'pass'
+          : test.status === 'failed'
+            ? 'error'
+            : test.status === 'skipped'
+              ? 'dash'
+              : 'circle-outline';
+      item.iconPath = new vscode.ThemeIcon(icon);
+      if (test.file) {
+        item.command = {
+          command: 'vscode.open',
+          title: 'Open test',
+          arguments: [
+            vscode.Uri.file(test.file),
+            { selection: new vscode.Range(Math.max(0, (test.line ?? 1) - 1), 0, Math.max(0, (test.line ?? 1) - 1), 0) },
+          ],
+        };
+      }
+      item.tooltip = new vscode.MarkdownString(
+        `**${test.title}**\n\n` +
+        `- **Status**: ${test.status}\n` +
+        (test.durationMs ? `- **Duration**: ${formatDuration(test.durationMs)}\n` : '') +
+        (test.file ? `- **Location**: \`${path.basename(test.file)}:${test.line ?? 1}\`\n` : '') +
+        (test.message ? `\n\`\`\`\n${test.message}\n\`\`\`` : ''),
+      );
+      item.contextValue = 'playwrightCompanionTestCase';
       return item;
     }
     if (element.type === 'failure') {

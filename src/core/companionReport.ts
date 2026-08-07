@@ -1,4 +1,4 @@
-import { CompanionFailure, CompanionRunSummary } from './companionTypes';
+import { CompanionFailure, CompanionRunSummary, CompanionTestItem, CompanionTestStatus } from './companionTypes';
 
 interface JsonResultError {
   message?: string;
@@ -46,6 +46,7 @@ export interface ParsedCompanionReport {
   flaky: number;
   durationMs: number;
   failures: CompanionFailure[];
+  tests: CompanionTestItem[];
 }
 
 /** Parses the stable subset of Playwright's JSON reporter output. */
@@ -62,6 +63,7 @@ export function parseCompanionJsonReport(text: string): ParsedCompanionReport | 
     flaky: 0,
     durationMs: 0,
     failures: [],
+    tests: [],
   };
   for (const suite of report.suites) {
     visitSuite(suite, [], undefined, undefined, summary);
@@ -86,6 +88,7 @@ export function withParsedReport(
     flaky: parsed.flaky,
     durationMs: Math.max(run.durationMs, parsed.durationMs),
     failures: parsed.failures,
+    tests: parsed.tests.length > 0 ? parsed.tests : run.tests,
   };
 }
 
@@ -130,6 +133,18 @@ function visitSpec(
     if (recovered) {
       summary.flaky++;
     }
+    const testTitle = titlePath.join(' › ') || 'Unnamed Playwright test';
+    const totalDuration = results.reduce((duration, result) => duration + (result.duration ?? 0), 0);
+    const testStatus: CompanionTestStatus = final.status === 'passed' ? 'passed' : final.status === 'skipped' ? 'skipped' : 'failed';
+    summary.tests.push({
+      id: `${file ?? ''}:${line ?? 1}:${testTitle}`,
+      title: testTitle,
+      file,
+      line,
+      status: testStatus,
+      durationMs: totalDuration,
+      message: testStatus === 'failed' ? errorMessage(final) : undefined,
+    });
     if (final.status === 'passed') {
       summary.passed++;
     } else if (final.status === 'skipped') {
@@ -137,7 +152,7 @@ function visitSpec(
     } else {
       summary.failed++;
       summary.failures.push({
-        title: titlePath.join(' › ') || 'Unnamed Playwright test',
+        title: testTitle,
         titlePath,
         file,
         line,
