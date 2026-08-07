@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { parseCompanionJsonReport, withParsedReport } from './core/companionReport';
+import { extractRunningTestTitle, parseCompanionJsonReport, withParsedReport } from './core/companionReport';
 import { CompanionCliRunRequest, CompanionRunSummary } from './core/companionTypes';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
@@ -161,22 +161,4 @@ async function readResult(file: string): Promise<string | undefined> {
 
 function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
-}
-
-function extractRunningTestTitle(text: string): string | undefined {
-  const lines = text.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) {
-      continue;
-    }
-    const match = /\[[^\]]+\]\s+›\s+(.+)$/.exec(line);
-    if (match) {
-      const raw = match[1].replace(/^[^:]+:\d+:\d+\s+›\s+/, '').trim();
-      if (raw) {
-        return raw;
-      }
-    }
-  }
-  return undefined;
 }

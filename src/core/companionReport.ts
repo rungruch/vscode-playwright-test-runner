@@ -176,3 +176,25 @@ function parseJsonObject(text: string): unknown {
     }
   }
 }
+
+/**
+ * Best-effort extraction of the active test title from Playwright CLI stdout/stderr line reporter text.
+ * Expects Playwright's standard line reporter format: `[browser] › file.spec.ts:line:col › Suite › Test Title`
+ */
+export function extractRunningTestTitle(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) {
+      continue;
+    }
+    const match = /\[[^\]]+\]\s+›\s+(.+)$/.exec(line);
+    if (match) {
+      const raw = match[1].replace(/^[^:]+:\d+:\d+\s+›\s+/, '').trim();
+      if (raw) {
+        return raw;
+      }
+    }
+  }
+  return undefined;
+}

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { parseCompanionJsonReport } from '../../core/companionReport';
+import { extractRunningTestTitle, parseCompanionJsonReport } from '../../core/companionReport';
 
 suite('companionReport', () => {
   test('parses totals, failures, duration, and recovered flaky tests', () => {
@@ -47,5 +47,28 @@ suite('companionReport', () => {
       durationMs: 0,
       failures: [],
     });
+  });
+});
+
+suite('extractRunningTestTitle', () => {
+  test('extracts title from line reporter format with location prefix', () => {
+    const line = '[chromium] › tests/calendar_single.spec.ts:37:9 › Verify Single Calendar UI › Verify Popover Calendar Container @calendar';
+    const title = extractRunningTestTitle(line);
+    assert.strictEqual(title, 'Verify Single Calendar UI › Verify Popover Calendar Container @calendar');
+  });
+
+  test('extracts title from multi-line terminal chunk', () => {
+    const chunk = [
+      'Running 20 tests using 1 worker',
+      '[chromium] › tests/calendar_single.spec.ts:10:5 › Suite A › Test One',
+      '[chromium] › tests/calendar_single.spec.ts:54:9 › Verify Single Calendar UI › Verify Popover Navigation Button',
+    ].join('\n');
+    const title = extractRunningTestTitle(chunk);
+    assert.strictEqual(title, 'Verify Single Calendar UI › Verify Popover Navigation Button');
+  });
+
+  test('returns undefined for non-line-reporter text', () => {
+    assert.strictEqual(extractRunningTestTitle('Starting Playwright CLI...'), undefined);
+    assert.strictEqual(extractRunningTestTitle(''), undefined);
   });
 });

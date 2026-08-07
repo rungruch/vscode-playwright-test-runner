@@ -171,8 +171,9 @@ export class PlaywrightSidebar implements vscode.Disposable {
 
   private artifactTreeItem(record: ArtifactRecord): vscode.TreeItem {
     const item = new vscode.TreeItem(record.label, vscode.TreeItemCollapsibleState.None);
-    const timeStr = new Date(record.modifiedAt).toLocaleTimeString();
-    const dateStr = new Date(record.modifiedAt).toLocaleDateString();
+    const date = new Date(record.modifiedAt);
+    const timeStr = date.toLocaleTimeString();
+    const dateStr = date.toLocaleDateString();
     item.description = `${dateStr} ${timeStr}`;
     item.tooltip = new vscode.MarkdownString(
       `**Playwright Artifact**: ${record.label}\n\n` +
