@@ -127,7 +127,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
     if (element.type === 'session') {
       const item = new vscode.TreeItem(`Active: ${element.session.name}`, vscode.TreeItemCollapsibleState.None);
       item.description = 'Companion CLI session';
-      item.tooltip = 'Long-lived UI/Inspector session reused for this resolved target.';
+      item.tooltip = 'The active global UI/Inspector session. Another interactive launch replaces it.';
       item.iconPath = new vscode.ThemeIcon('terminal');
       item.contextValue = 'playwrightCompanionSession';
       return item;

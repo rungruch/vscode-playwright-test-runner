@@ -1,5 +1,10 @@
 # Change Log
 
+## 3.2.0 - 2026-09-02
+
+- Keep a single global Playwright UI or Inspector terminal. Launching another interactive action now cancels the current session and starts the new request instead of reporting that the target is already running.
+- Add `playwrightCodeLensRunner.sidebar.runsEnabled`. Disable it to hide the managed Runs dashboard and launch Flake Lab or failed-test rerun commands directly in an integrated terminal while retaining the Artifacts view.
+
 ## 3.1.0 - 2026-08-06
 
 - Add companion-owned Flake Lab runs, changed/last-failed UI workflows, tag actions, remote UI profiles, and a Playwright Activity Bar view for local CLI summaries and artifacts. Native results remain owned by Microsoft Playwright Testing.

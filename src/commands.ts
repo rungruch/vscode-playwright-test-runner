@@ -4,6 +4,7 @@ import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
 import { ArtifactRecord, CompanionFailure, CompanionRunSummary, UiProfile } from './core/companionTypes';
 import { ForcedInspectorBrowser, resolveInspectorBrowser } from './core/inspectorBrowser';
+import { dispatchManagedRun } from './core/managedRunDispatch';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import {
   buildChangedUiArguments,
@@ -364,25 +365,31 @@ async function flakeLabCommand(
     trace: settings.flakeLabTrace,
     failOnFlakyTests: settings.flakeLabFailOnFlakyTests,
   });
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: `Playwright Flake Lab: ${path.basename(selection.file)}`,
-      cancellable: true,
+  await dispatchManagedRun({
+    runsEnabled: settings.sidebarRunsEnabled,
+    runInTerminal: () => runInTerminal(target, `Playwright Flake Lab: ${path.basename(selection.file)}`, args),
+    runManaged: async () => vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: `Playwright Flake Lab: ${path.basename(selection.file)}`,
+        cancellable: true,
+      },
+      async (_progress, token) => deps.runner.run(target, {
+        kind: 'flake-lab',
+        targetId: target.id,
+        cwd: target.cwd,
+        configFile: target.configFile,
+        args,
+        env: target.env,
+        selection: runSelection,
+        projects,
+      }, token),
+    ),
+    afterManaged: async () => {
+      await deps.sidebar.refreshArtifacts(await currentTargets(deps));
+      await focusCompanionFor(target);
     },
-    async (_progress, token) => deps.runner.run(target, {
-      kind: 'flake-lab',
-      targetId: target.id,
-      cwd: target.cwd,
-      configFile: target.configFile,
-      args,
-      env: target.env,
-      selection: runSelection,
-      projects,
-    }, token),
-  );
-  await deps.sidebar.refreshArtifacts(await currentTargets(deps));
-  await focusCompanionFor(target);
+  });
 }
 
 async function changedUiCommand(deps: CommandDeps, selection: EditorTestSelection | undefined): Promise<void> {
@@ -517,25 +524,31 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     }),
     ...target.runOptions,
   ];
-  await vscode.window.withProgress(
-    {
-      location: vscode.ProgressLocation.Notification,
-      title: 'Playwright: rerun failed companion tests',
-      cancellable: true,
+  await dispatchManagedRun({
+    runsEnabled: settingsFor(target).sidebarRunsEnabled,
+    runInTerminal: () => runInTerminal(target, 'Playwright Rerun Failed', args),
+    runManaged: async () => vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Playwright: rerun failed companion tests',
+        cancellable: true,
+      },
+      async (_progress, token) => deps.runner.run(target, {
+        kind: 'rerun-failed',
+        targetId: target.id,
+        cwd: target.cwd,
+        configFile: target.configFile,
+        args,
+        env: target.env,
+        selection,
+        projects,
+      }, token),
+    ),
+    afterManaged: async () => {
+      await deps.sidebar.refreshArtifacts(await currentTargets(deps));
+      await focusCompanionFor(target);
     },
-    async (_progress, token) => deps.runner.run(target, {
-      kind: 'rerun-failed',
-      targetId: target.id,
-      cwd: target.cwd,
-      configFile: target.configFile,
-      args,
-      env: target.env,
-      selection,
-      projects,
-    }, token),
-  );
-  await deps.sidebar.refreshArtifacts(await currentTargets(deps));
-  await focusCompanionFor(target);
+  });
 }
 
 async function artifactCenterCommand(deps: CommandDeps): Promise<void> {

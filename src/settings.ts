@@ -101,6 +101,10 @@ export class Settings {
     return this.configuration().get<boolean>('sidebar.autoFocus', true);
   }
 
+  get sidebarRunsEnabled(): boolean {
+    return this.configuration().get<boolean>('sidebar.runsEnabled', true);
+  }
+
   get artifactScanDirectories(): string[] {
     const directories = this.configuration().get<unknown>('artifacts.scanDirectories', [
       'playwright-report', 'blob-report', 'test-results',

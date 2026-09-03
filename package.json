@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -204,6 +204,12 @@
             "default": true,
             "markdownDescription": "Focus Microsoft Testing after native Run/Debug and the companion Playwright view after companion actions.",
             "scope": "resource"
+          },
+          "playwrightCodeLensRunner.sidebar.runsEnabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Capture Flake Lab and failed-test rerun results in the Playwright Runs sidebar. When disabled, those generated commands run directly in an integrated terminal without managed summaries.",
+            "scope": "window"
           },
           "playwrightCodeLensRunner.artifacts.scanDirectories": {
             "type": "array",
@@ -501,7 +507,8 @@
       "playwrightCodeLensRunner": [
         {
           "id": "playwrightCodeLensRunner.runsView",
-          "name": "Playwright Runs"
+          "name": "Playwright Runs",
+          "when": "config.playwrightCodeLensRunner.sidebar.runsEnabled"
         },
         {
           "id": "playwrightCodeLensRunner.artifactsView",
@@ -513,12 +520,12 @@
       "view/title": [
         {
           "command": "playwrightCodeLensRunner.openRunsView",
-          "when": "view == playwrightCodeLensRunner.runsView",
+          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
           "group": "navigation@1"
         },
         {
           "command": "playwrightCodeLensRunner.rerunFailedCli",
-          "when": "view == playwrightCodeLensRunner.runsView",
+          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
           "group": "navigation@2"
         },
         {
