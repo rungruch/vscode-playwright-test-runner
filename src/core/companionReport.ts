@@ -186,7 +186,10 @@ export function withParsedReport(
 }
 
 function stripTags(title: string): string {
-  return title.replace(/(?:\s+@\S+)+$/g, '').trim();
+  return title
+    .replace(/(?:\s*\(retry\s*#\d+\))$/gi, '')
+    .replace(/(?:\s+@\S+)+$/g, '')
+    .trim();
 }
 
 function stripFilePrefix(title: string): string {
@@ -344,6 +347,7 @@ export interface RunningProgressInfo {
   project?: string;
   totalAnnounced?: number;
   failedTitle?: string;
+  isRetry?: boolean;
 }
 
 /**
@@ -368,9 +372,11 @@ export function extractRunningProgress(text: string): RunningProgressInfo | unde
 
     // Line reporter format:
     // [1/5] [browserless] › tests/example.spec.ts:4:7 › Math › adds numbers
+    // [12/17] (retries) [chromium] › tests/calendar.spec.ts:631:9 › ... (retry #1)
     // or [browserless] › tests/example.spec.ts:4:7 › Math › adds numbers
     // or [1/5] › tests/example.spec.ts:4:7 › Math › adds numbers
-    const testLineMatch = /^(?:\[(\d+)\/(\d+)\]\s+)?(?:\[([^\]]+)\]\s+›\s+)?(?:([^:\s]+):(\d+):(\d+)\s+›\s+)?(.+)$/.exec(line);
+    const isRetry = /\((?:retries|retry(?:\s*#\d+)?)\)/i.test(line);
+    const testLineMatch = /^(?:\[(\d+)\/(\d+)\]\s+)?(?:\((?:retries|retry(?:\s*#\d+)?)\)\s+)?(?:\[([^\]]+)\]\s+›\s+)?(?:([^:\s]+):(\d+):(\d+)\s+›\s+)?(.+)$/.exec(line);
     if (testLineMatch) {
       const idx = testLineMatch[1] ? parseInt(testLineMatch[1], 10) : undefined;
       const tot = testLineMatch[2] ? parseInt(testLineMatch[2], 10) : undefined;
@@ -382,6 +388,7 @@ export function extractRunningProgress(text: string): RunningProgressInfo | unde
 
       if (idx !== undefined || project || (file && lineNum !== undefined)) {
         title = title ? title.replace(/^[^:\s]+:\d+:\d+\s+›\s+/, '').trim() : '';
+        title = title ? title.replace(/\s*\(retry\s*#\d+\)$/i, '').trim() : '';
         if (title) {
           result = {
             ...result,
@@ -392,20 +399,25 @@ export function extractRunningProgress(text: string): RunningProgressInfo | unde
             line: lineNum,
             column: col,
             title,
+            isRetry: isRetry || undefined,
           };
         }
       }
     }
 
-    // Failure marker: "  1) [browser] › file:line:col › title"
-    const failMatch = /^\d+\)\s+(?:\[([^\]]+)\]\s+›\s+)?(?:([^:\s]+):(\d+):(\d+)\s+›\s+)?(.+)$/.exec(line);
+    // Failure marker: "  1) [browser] › file:line:col › title ---------------------"
+    const failMatch = /^\s*\d+\)\s+(?:\[([^\]]+)\]\s+›\s+)?(?:([^:\s]+):(\d+):(\d+)\s+›\s+)?(.+)$/.exec(line);
     if (failMatch) {
-      const rawFail = failMatch[4]?.trim();
+      let rawFail = failMatch[5]?.trim();
       if (rawFail) {
-        result = {
-          ...result,
-          failedTitle: rawFail.replace(/^[^:\s]+:\d+:\d+\s+›\s+/, '').trim(),
-        };
+        rawFail = rawFail.replace(/\s*-+$/g, '').trim();
+        rawFail = rawFail.replace(/^[^:\s]+:\d+:\d+\s+›\s+/, '').trim();
+        if (rawFail) {
+          result = {
+            ...result,
+            failedTitle: rawFail,
+          };
+        }
       }
     }
   }

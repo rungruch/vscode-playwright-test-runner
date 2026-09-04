@@ -147,6 +147,28 @@ suite('extractRunningProgress and extractRunningTestTitle', () => {
     assert.strictEqual(extractRunningTestTitle('Starting Playwright CLI...'), undefined);
     assert.strictEqual(extractRunningTestTitle(''), undefined);
   });
+
+  test('extracts retry line with (retries) prefix and cleans retry tag', () => {
+    const line = '[12/17] (retries) [chromium] › tests/calendar_range.spec.ts:631:9 › Verify Range Calendar Logic › Verify Select Date on Range Date Selection Calendar - Select Single Date @calendar (retry #1)';
+    const progress = extractRunningProgress(line);
+    assert.ok(progress);
+    assert.strictEqual(progress.index, 12);
+    assert.strictEqual(progress.total, 17);
+    assert.strictEqual(progress.project, 'chromium');
+    assert.strictEqual(progress.file, 'tests/calendar_range.spec.ts');
+    assert.strictEqual(progress.line, 631);
+    assert.strictEqual(progress.column, 9);
+    assert.strictEqual(progress.isRetry, true);
+    assert.strictEqual(progress.title, 'Verify Range Calendar Logic › Verify Select Date on Range Date Selection Calendar - Select Single Date @calendar');
+    assert.strictEqual(extractRunningTestTitle(line), 'Verify Range Calendar Logic › Verify Select Date on Range Date Selection Calendar - Select Single Date @calendar');
+  });
+
+  test('extracts failed title from failure marker line with trailing dashes', () => {
+    const line = '  1) [chromium] › tests/calendar_range.spec.ts:631:9 › Verify Range Calendar Logic › Verify Select Date --------------------';
+    const progress = extractRunningProgress(line);
+    assert.ok(progress);
+    assert.strictEqual(progress.failedTitle, 'Verify Range Calendar Logic › Verify Select Date');
+  });
 });
 
 suite('lookupTestRunStatus', () => {

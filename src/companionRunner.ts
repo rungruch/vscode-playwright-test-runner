@@ -7,6 +7,7 @@ import {
   isTitleMatch,
   lookupTestRunStatus,
   parseCompanionJsonReport,
+  RunningProgressInfo,
   TestRunStatus,
   withParsedReport,
 } from './core/companionReport';
@@ -135,10 +136,10 @@ export class CompanionCliRunner implements vscode.Disposable {
       const currentTest = progress.title;
       const titleChanged = Boolean(currentTest && currentTest !== summary.currentTest);
 
-      if (indexChanged || titleChanged || updated) {
+      if (indexChanged || titleChanged || updated || progress.failedTitle) {
         const completedCount = progress.index !== undefined ? Math.max(0, progress.index - 1) : summary.completedTests;
-        const updatedTests = currentTest
-          ? updateRunningTests(summary.tests ?? [], currentTest, progress.failedTitle)
+        const updatedTests = (currentTest || progress.failedTitle)
+          ? updateRunningTests(summary.tests ?? [], progress)
           : summary.tests;
         summary = {
           ...summary,
@@ -177,8 +178,16 @@ export class CompanionCliRunner implements vscode.Disposable {
       const outcome = await running.outcome;
       const report = await readResult(resultFile) ?? collectedOutput;
       summary = withParsedReport(summary, parseCompanionJsonReport(report));
-      if (outcome.cancelled && summary.tests) {
-        summary.tests = summary.tests.map((t) => (t.status === 'running' ? { ...t, status: 'pending' as const } : t));
+      if (summary.tests) {
+        summary.tests = summary.tests.map((t) => {
+          if (t.status === 'running') {
+            if (outcome.cancelled) {
+              return { ...t, status: 'pending' as const };
+            }
+            return { ...t, status: outcome.exitCode === 0 ? 'passed' as const : 'failed' as const };
+          }
+          return t;
+        });
       }
       summary = {
         ...summary,
@@ -269,29 +278,57 @@ function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
 }
 
-function updateRunningTests(tests: CompanionTestItem[], runningTitle: string, failedTitle?: string): CompanionTestItem[] {
+function updateRunningTests(tests: CompanionTestItem[], progress: RunningProgressInfo): CompanionTestItem[] {
   const result: CompanionTestItem[] = tests.map((t) => ({ ...t }));
-  for (const t of result) {
-    if (t.status === 'running') {
-      t.status = failedTitle && isTitleMatch(t.title, failedTitle) ? 'failed' : 'passed';
+
+  if (progress.failedTitle) {
+    for (const t of result) {
+      if (isTitleMatch(t.title, progress.failedTitle)) {
+        t.status = 'failed';
+      }
     }
   }
-  let matched = false;
-  for (const t of result) {
-    if (isTitleMatch(t.title, runningTitle)) {
-      t.status = 'running';
-      t.title = runningTitle;
-      matched = true;
-      break;
+
+  if (progress.title) {
+    const runningTitle = progress.title;
+    let matched = false;
+    for (const t of result) {
+      const matchByLoc = Boolean(
+        progress.file && t.file && path.normalize(progress.file) === path.normalize(t.file)
+        && progress.line !== undefined && t.line === progress.line,
+      );
+      if (matchByLoc || isTitleMatch(t.title, runningTitle)) {
+        if (progress.isRetry) {
+          t.status = 'flaky';
+        } else if (t.status !== 'failed') {
+          t.status = 'running';
+        }
+        if (progress.project && !t.project) {
+          t.project = progress.project;
+        }
+        if (progress.file && !t.file) {
+          t.file = progress.file;
+        }
+        if (progress.line !== undefined && !t.line) {
+          t.line = progress.line;
+        }
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      result.push({
+        id: progress.file && progress.line ? `${progress.file}:${progress.line}:${runningTitle}` : runningTitle,
+        title: runningTitle,
+        file: progress.file,
+        line: progress.line,
+        project: progress.project,
+        status: progress.isRetry ? 'flaky' : 'running',
+      });
     }
   }
-  if (!matched) {
-    result.push({
-      id: runningTitle,
-      title: runningTitle,
-      status: 'running',
-    });
-  }
+
   return result;
 }
 
