@@ -1,9 +1,27 @@
 # Change Log
 
+## 3.3.0 - 2026-09-04
+
+- Add **Run Companion Test (Normal CLI Run)** action to the **More…** quick pick menu and Command Palette (`playwrightCodeLensRunner.runCompanion`), supporting standard single Playwright companion executions alongside Flake Lab stress testing.
+- Live test progress display: parses Playwright line reporter output during execution and renders individual test status icons (`running`, `passed`, `failed`, `skipped`) and active test titles live in the Playwright Runs sidebar.
+- Maintain a single global Playwright UI or Inspector terminal: launching another interactive action replaces the current session automatically instead of reporting that the target is already running.
+- Add `playwrightCodeLensRunner.sidebar.runsEnabled` setting: disable it to hide the managed Runs dashboard and launch companion runs (Normal Companion Run, Flake Lab, or failed reruns) directly in an integrated terminal.
+- Fixed **Rerun Failed** regex filter bug: sanitized `titlePath` entries to prevent duplicate filename segments in `--grep` regexes, resolving `Error: No tests found.`.
+- Prevent report server port collisions by assigning dynamic ports (`--port 0`) when opening HTML reports.
+- Overhauled Playwright sidebar views with Codicon header action buttons, inline hover actions on tree items, and rich Markdown tooltips.
+
 ## 3.2.0 - 2026-09-02
 
 - Keep a single global Playwright UI or Inspector terminal. Launching another interactive action now cancels the current session and starts the new request instead of reporting that the target is already running.
 - Add `playwrightCodeLensRunner.sidebar.runsEnabled`. Disable it to hide the managed Runs dashboard and launch Flake Lab or failed-test rerun commands directly in an integrated terminal while retaining the Artifacts view.
+
+## 3.1.1 - 2026-08-07
+
+- Added **Run Companion Test (Normal CLI Run)** action to the **More…** quick pick menu and Command Palette (`playwrightCodeLensRunner.runCompanion`), allowing single Playwright companion runs without Flake Lab's repeating overhead.
+- Immediate sidebar auto-focus: launching a companion run (**Run Companion**, **Flake Lab**, or **Rerun Failed**) opens and focuses the **Playwright Runs** sidebar view instantly at launch time.
+- Live test progress display: parses Playwright line reporter output during execution and renders active test title (`running · <Active Test Title>`) live in the primary sidebar tree view.
+- Fixed **Rerun Failed** regex filter bug: sanitized `titlePath` entries to prevent duplicate filename segments in `--grep` regexes, resolving `Error: No tests found.`.
+- Overhauled primary sidebar views (**PLAYWRIGHT RUNS** and **PLAYWRIGHT ARTIFACTS**): added Codicon section header action buttons, inline hover context actions on tree items, and rich Markdown tooltips.
 
 ## 3.1.0 - 2026-08-06
 

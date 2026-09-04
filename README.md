@@ -6,7 +6,7 @@
 
 Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
 
-Version 3.2 adds replace-on-rerun UI/Inspector sessions and an optional managed Runs dashboard while retaining 3.1's companion Flake Lab runs, artifacts, advanced UI workflows, and configurable CodeLens actions.
+Version 3.3 adds normal Companion Runs, real-time sidebar test execution tracking, replace-on-rerun UI/Inspector sessions, and an optional managed Runs dashboard while retaining companion Flake Lab runs, artifacts, advanced UI workflows, and configurable CodeLens actions.
 
 Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
 
@@ -47,9 +47,13 @@ Loop-generated tests remain one declaration. Microsoft Testing Run/Debug and the
 | Inspect | Playwright CodeLens Runner | Playwright Inspector and an integrated terminal |
 | Playwright UI | Playwright CodeLens Runner | Playwright UI and an integrated terminal |
 
-## Flake Lab and companion dashboard
+## Companion Runs, Flake Lab, and sidebar dashboard
 
-**Flake Lab** is a companion CLI run for the current file, suite, test, or generated-case declaration. It deliberately does not create a native VS Code test run. By default it uses `--repeat-each 10`, `--workers 1`, `--retries 1`, `--trace on`, and `--fail-on-flaky-tests`; the last flag requires Playwright Test 1.52 or later. The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, provides **Rerun Failed**, and links back to Microsoft Testing for native results. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide this managed Runs view and launch Flake Lab or cached failed-test reruns directly in an integrated terminal instead. Terminal-only runs use the generated Playwright arguments without the managed JSON reporter or summary updates; the Artifacts view remains available.
+**Run Companion Test (Normal CLI Run)** is an extension-owned Playwright CLI execution available via **More…** and Command Palette (`playwrightCodeLensRunner.runCompanion`). It runs tests with target-scoped arguments without native VS Code test run duplication and without Flake Lab's repeating overhead.
+
+**Flake Lab** is a companion CLI run for the current file, suite, test, or generated-case declaration. It deliberately does not create a native VS Code test run. By default it uses `--repeat-each 10`, `--workers 1`, `--retries 1`, `--trace on`, and `--fail-on-flaky-tests`; the last flag requires Playwright Test 1.52 or later.
+
+The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, provides live test execution progress with individual status icons (`running`, `passed`, `failed`, `skipped`), provides **Rerun Failed**, and links back to Microsoft Testing for native results. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide this managed Runs view and launch Companion runs, Flake Lab, or cached failed-test reruns directly in an integrated terminal instead. Terminal-only runs use the generated Playwright arguments without the managed JSON reporter or summary updates; the Artifacts view remains available.
 
 The companion’s **More…** menu also provides changed and last-failed Playwright UI launches, discovered-tag actions, UI profiles, and Artifact Center. **Open Changed Tests in Playwright UI** uses `--only-changed` for uncommitted changes by default or a supplied Git ref; **Open Last Failed Tests in Playwright UI** uses Playwright’s persisted last-run data. These are target-scoped: they preserve the resolved config and selected companion projects without adding the current test title filter.
 
@@ -168,7 +172,7 @@ Discovery Details and Retry preserve file scope only when the active document ma
 
 ## Settings
 
-All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 3.2 continues the clean break from earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers: they are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
+All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Version 3.3 continues the clean break from earlier `playwrightrunner.*` and `playwrightCliRunner.*` identifiers: they are no longer read, aliased, or migrated. Update any workspace configuration to the namespace below.
 
 | Setting | Purpose | Default |
 | --- | --- | --- |

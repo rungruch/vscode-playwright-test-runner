@@ -1,4 +1,4 @@
-import { CompanionFailure, CompanionRunSummary } from './companionTypes';
+import { CompanionFailure, CompanionRunSummary, CompanionTestItem, CompanionTestStatus } from './companionTypes';
 
 interface JsonResultError {
   message?: string;
@@ -46,6 +46,7 @@ export interface ParsedCompanionReport {
   flaky: number;
   durationMs: number;
   failures: CompanionFailure[];
+  tests: CompanionTestItem[];
 }
 
 /** Parses the stable subset of Playwright's JSON reporter output. */
@@ -62,6 +63,7 @@ export function parseCompanionJsonReport(text: string): ParsedCompanionReport | 
     flaky: 0,
     durationMs: 0,
     failures: [],
+    tests: [],
   };
   for (const suite of report.suites) {
     visitSuite(suite, [], undefined, undefined, summary);
@@ -77,6 +79,17 @@ export function withParsedReport(
   if (!parsed) {
     return run;
   }
+  const mergedTests = run.tests ? run.tests.map((t) => ({ ...t })) : [];
+  if (parsed.tests.length > 0) {
+    for (const parsedTest of parsed.tests) {
+      const idx = mergedTests.findIndex((t) => isTitleMatch(t.title, parsedTest.title));
+      if (idx >= 0) {
+        mergedTests[idx] = { ...mergedTests[idx], ...parsedTest };
+      } else {
+        mergedTests.push(parsedTest);
+      }
+    }
+  }
   return {
     ...run,
     total: parsed.total,
@@ -86,7 +99,29 @@ export function withParsedReport(
     flaky: parsed.flaky,
     durationMs: Math.max(run.durationMs, parsed.durationMs),
     failures: parsed.failures,
+    tests: mergedTests.length > 0 ? mergedTests : run.tests,
   };
+}
+
+function stripTags(title: string): string {
+  return title.replace(/(?:\s+@\S+)+$/g, '').trim();
+}
+
+export function isTitleMatch(a: string, b: string): boolean {
+  if (a === b) {
+    return true;
+  }
+  const cleanA = stripTags(a);
+  const cleanB = stripTags(b);
+  if (cleanA === cleanB) {
+    return true;
+  }
+  return (
+    cleanB.endsWith(` › ${cleanA}`)
+    || cleanA.endsWith(` › ${cleanB}`)
+    || cleanB.endsWith(` ${cleanA}`)
+    || cleanA.endsWith(` ${cleanB}`)
+  );
 }
 
 function visitSuite(
@@ -123,13 +158,25 @@ function visitSpec(
       continue;
     }
     summary.total++;
-    summary.durationMs += results.reduce((duration, result) => duration + (result.duration ?? 0), 0);
+    const totalDuration = results.reduce((duration, result) => duration + (result.duration ?? 0), 0);
+    summary.durationMs += totalDuration;
     const final = results[results.length - 1];
     const statuses = results.map((result) => result.status ?? 'unknown');
     const recovered = final.status === 'passed' && statuses.slice(0, -1).some((status) => isFailure(status));
     if (recovered) {
       summary.flaky++;
     }
+    const testTitle = titlePath.join(' › ') || 'Unnamed Playwright test';
+    const testStatus: CompanionTestStatus = final.status === 'passed' ? 'passed' : final.status === 'skipped' ? 'skipped' : 'failed';
+    summary.tests.push({
+      id: `${file ?? ''}:${line ?? 1}:${testTitle}`,
+      title: testTitle,
+      file,
+      line,
+      status: testStatus,
+      durationMs: totalDuration,
+      message: testStatus === 'failed' ? errorMessage(final) : undefined,
+    });
     if (final.status === 'passed') {
       summary.passed++;
     } else if (final.status === 'skipped') {
@@ -137,7 +184,7 @@ function visitSpec(
     } else {
       summary.failed++;
       summary.failures.push({
-        title: titlePath.join(' › ') || 'Unnamed Playwright test',
+        title: testTitle,
         titlePath,
         file,
         line,
@@ -175,4 +222,26 @@ function parseJsonObject(text: string): unknown {
       return undefined;
     }
   }
+}
+
+/**
+ * Best-effort extraction of the active test title from Playwright CLI stdout/stderr line reporter text.
+ * Expects Playwright's standard line reporter format: `[browser] › file.spec.ts:line:col › Suite › Test Title`
+ */
+export function extractRunningTestTitle(text: string): string | undefined {
+  const lines = text.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (!line) {
+      continue;
+    }
+    const match = /\[[^\]]+\]\s+›\s+(.+)$/.exec(line);
+    if (match) {
+      const raw = match[1].replace(/^[^:]+:\d+:\d+\s+›\s+/, '').trim();
+      if (raw) {
+        return raw;
+      }
+    }
+  }
+  return undefined;
 }

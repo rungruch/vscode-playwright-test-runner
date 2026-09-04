@@ -2,12 +2,13 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
-import { ArtifactRecord, CompanionFailure, CompanionRunSummary } from './core/companionTypes';
+import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { InteractiveSession, InteractiveSessionManager } from './interactiveSessions';
 import { RunTarget } from './runTarget';
 
 type RunElement =
   | { type: 'run'; run: CompanionRunSummary }
+  | { type: 'testCase'; test: CompanionTestItem }
   | { type: 'failure'; failure: CompanionFailure }
   | { type: 'session'; session: InteractiveSession }
   | { type: 'action'; label: string; command: string; icon: string };
@@ -80,13 +81,16 @@ export class PlaywrightSidebar implements vscode.Disposable {
     }
     if (element.type === 'run') {
       const run = element.run;
-      const totals: RunElement[] = [{
+      const totals: RunElement[] = [];
+      totals.push({
         type: 'action',
         label: `Total ${run.total} · Passed ${run.passed} · Failed ${run.failed} · Skipped ${run.skipped} · Flaky ${run.flaky}`,
         command: 'playwrightCodeLensRunner.openRunsView',
         icon: run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error',
-      }];
-      if (run.failures.length > 0) {
+      });
+      if (run.tests && run.tests.length > 0) {
+        totals.push(...run.tests.map((test) => ({ type: 'testCase' as const, test })));
+      } else if (run.failures.length > 0) {
         totals.push(...run.failures.map((failure) => ({ type: 'failure' as const, failure })));
       }
       if (run.failed > 0) {
@@ -100,21 +104,80 @@ export class PlaywrightSidebar implements vscode.Disposable {
   private runTreeItem(element: RunElement): vscode.TreeItem {
     if (element.type === 'run') {
       const run = element.run;
+      const kindLabel = run.kind === 'flake-lab' ? 'Flake Lab' : run.kind === 'companion-run' ? 'Companion run' : 'failed-test rerun';
+      const targetFile = run.selection?.files?.[0];
+      const fileBasename = targetFile ? ` (${path.basename(targetFile)})` : '';
+      const isExpanded = Boolean((run.tests && run.tests.length > 0) || run.failures.length > 0 || run.status === 'running');
       const item = new vscode.TreeItem(
-        `Latest ${run.kind === 'flake-lab' ? 'Flake Lab' : 'failed-test rerun'}`,
-        run.failures.length > 0 ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
+        `Latest ${kindLabel}${fileBasename}`,
+        isExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
       );
-      item.description = `${run.status} · ${formatDuration(run.durationMs)}`;
-      item.tooltip = 'Companion CLI result. Native Run/Debug results remain in Microsoft Playwright Testing.';
+      item.description = run.status === 'running' && run.currentTest
+        ? `running · ${run.currentTest}`
+        : `${run.status} · ${formatDuration(run.durationMs)}`;
+      const startedStr = new Date(run.startedAt).toLocaleTimeString();
+      item.tooltip = new vscode.MarkdownString(
+        `**Playwright ${kindLabel}**\n\n` +
+        `- **Status**: ${run.status}\n` +
+        `- **Started**: ${startedStr}\n` +
+        `- **Duration**: ${formatDuration(run.durationMs)}\n` +
+        `- **Passed**: ${run.passed} / ${run.total}\n` +
+        `- **Failed**: ${run.failed}\n` +
+        `- **Flaky**: ${run.flaky}\n` +
+        `- **Skipped**: ${run.skipped}\n` +
+        (run.configFile ? `- **Config**: \`${path.basename(run.configFile)}\`` : ''),
+      );
       item.iconPath = new vscode.ThemeIcon(run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error');
       item.contextValue = 'playwrightCompanionRun';
+      return item;
+    }
+    if (element.type === 'testCase') {
+      const test = element.test;
+      const item = new vscode.TreeItem(test.title, vscode.TreeItemCollapsibleState.None);
+      item.description = test.status === 'running'
+        ? 'running'
+        : test.durationMs !== undefined && test.durationMs > 0
+          ? formatDuration(test.durationMs)
+          : test.status;
+      const icon = test.status === 'running'
+        ? 'sync~spin'
+        : test.status === 'passed'
+          ? 'pass'
+          : test.status === 'failed'
+            ? 'error'
+            : test.status === 'skipped'
+              ? 'dash'
+              : 'circle-outline';
+      item.iconPath = new vscode.ThemeIcon(icon);
+      if (test.file) {
+        item.command = {
+          command: 'vscode.open',
+          title: 'Open test',
+          arguments: [
+            vscode.Uri.file(test.file),
+            { selection: new vscode.Range(Math.max(0, (test.line ?? 1) - 1), 0, Math.max(0, (test.line ?? 1) - 1), 0) },
+          ],
+        };
+      }
+      item.tooltip = new vscode.MarkdownString(
+        `**${test.title}**\n\n` +
+        `- **Status**: ${test.status}\n` +
+        (test.durationMs ? `- **Duration**: ${formatDuration(test.durationMs)}\n` : '') +
+        (test.file ? `- **Location**: \`${path.basename(test.file)}:${test.line ?? 1}\`\n` : '') +
+        (test.message ? `\n\`\`\`\n${test.message}\n\`\`\`` : ''),
+      );
+      item.contextValue = 'playwrightCompanionTestCase';
       return item;
     }
     if (element.type === 'failure') {
       const failure = element.failure;
       const item = new vscode.TreeItem(failure.title, vscode.TreeItemCollapsibleState.None);
       item.description = failure.file ? `${path.basename(failure.file)}:${failure.line ?? 1}` : 'Failure';
-      item.tooltip = failure.message ?? failure.title;
+      item.tooltip = new vscode.MarkdownString(
+        `**Failure**: ${failure.title}\n\n` +
+        (failure.file ? `**Location**: \`${failure.file}:${failure.line ?? 1}\`\n\n` : '') +
+        (failure.message ? `\`\`\`\n${failure.message}\n\`\`\`` : ''),
+      );
       item.command = failure.file ? {
         command: 'playwrightCodeLensRunner.openFailure',
         title: 'Open failure',
@@ -141,8 +204,16 @@ export class PlaywrightSidebar implements vscode.Disposable {
 
   private artifactTreeItem(record: ArtifactRecord): vscode.TreeItem {
     const item = new vscode.TreeItem(record.label, vscode.TreeItemCollapsibleState.None);
-    item.description = new Date(record.modifiedAt).toLocaleString();
-    item.tooltip = record.path;
+    const date = new Date(record.modifiedAt);
+    const timeStr = date.toLocaleTimeString();
+    const dateStr = date.toLocaleDateString();
+    item.description = `${dateStr} ${timeStr}`;
+    item.tooltip = new vscode.MarkdownString(
+      `**Playwright Artifact**: ${record.label}\n\n` +
+      `- **Type**: ${record.kind}\n` +
+      `- **Modified**: ${dateStr} ${timeStr}\n` +
+      `- **Path**: \`${record.path}\``,
+    );
     item.resourceUri = vscode.Uri.file(record.path);
     item.command = {
       command: 'playwrightCodeLensRunner.openArtifact',

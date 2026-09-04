@@ -33,6 +33,20 @@ suite('runArguments', () => {
     );
   });
 
+  test('handles JSON reporter titlePath containing leading empty string and filename without duplication', () => {
+    const file = '/ws/tests/calendar_single.spec.ts';
+    const jsonTitlePath = ['', 'tests/calendar_single.spec.ts', 'Verify Single Calendar UI', 'Verify Popover Calendar Container'];
+    const filter = fullTitleFilter(jsonTitlePath, file);
+    assert.match(
+      'chromium tests/calendar_single.spec.ts Verify Single Calendar UI Verify Popover Calendar Container @calendar',
+      new RegExp(filter),
+    );
+    assert.match(
+      'calendar_single.spec.ts › Verify Single Calendar UI › Verify Popover Calendar Container @calendar',
+      new RegExp(filter),
+    );
+  });
+
   test('keeps exact title-path boundaries for generated cases', () => {
     const file = '/ws/tests/generated.spec.ts';
     const exact = new RegExp(fullTitleFilter(['admin'], file));

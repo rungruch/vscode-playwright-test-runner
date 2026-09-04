@@ -43,8 +43,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 3.2.0 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '3.2.0');
+  test('declares the 3.3.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '3.3.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
@@ -100,6 +100,7 @@ suite('extension manifest', () => {
     const commands = new Set((manifest.contributes?.commands ?? []).map((entry) => entry.command));
     for (const command of [
       'playwrightCodeLensRunner.flakeLab',
+      'playwrightCodeLensRunner.runCompanion',
       'playwrightCodeLensRunner.openChangedUi',
       'playwrightCodeLensRunner.openLastFailedUi',
       'playwrightCodeLensRunner.tagActions',

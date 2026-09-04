@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { parseCompanionJsonReport } from '../../core/companionReport';
+import { extractRunningTestTitle, parseCompanionJsonReport } from '../../core/companionReport';
 
 suite('companionReport', () => {
   test('parses totals, failures, duration, and recovered flaky tests', () => {
@@ -34,6 +34,16 @@ suite('companionReport', () => {
     assert.strictEqual(parsed.failures[0].file, '/ws/tests/example.spec.ts');
     assert.strictEqual(parsed.failures[0].line, 14);
     assert.match(parsed.failures[0].message ?? '', /expected true/);
+    assert.strictEqual(parsed.tests.length, 4);
+    assert.deepStrictEqual(
+      parsed.tests.map((t) => ({ title: t.title, status: t.status })),
+      [
+        { title: 'tests/example.spec.ts › stable', status: 'passed' },
+        { title: 'tests/example.spec.ts › recovers', status: 'passed' },
+        { title: 'tests/example.spec.ts › breaks', status: 'failed' },
+        { title: 'tests/example.spec.ts › skips', status: 'skipped' },
+      ],
+    );
   });
 
   test('tolerates malformed or incomplete output', () => {
@@ -46,6 +56,30 @@ suite('companionReport', () => {
       flaky: 0,
       durationMs: 0,
       failures: [],
+      tests: [],
     });
+  });
+});
+
+suite('extractRunningTestTitle', () => {
+  test('extracts title from line reporter format with location prefix', () => {
+    const line = '[chromium] › tests/calendar_single.spec.ts:37:9 › Verify Single Calendar UI › Verify Popover Calendar Container @calendar';
+    const title = extractRunningTestTitle(line);
+    assert.strictEqual(title, 'Verify Single Calendar UI › Verify Popover Calendar Container @calendar');
+  });
+
+  test('extracts title from multi-line terminal chunk', () => {
+    const chunk = [
+      'Running 20 tests using 1 worker',
+      '[chromium] › tests/calendar_single.spec.ts:10:5 › Suite A › Test One',
+      '[chromium] › tests/calendar_single.spec.ts:54:9 › Verify Single Calendar UI › Verify Popover Navigation Button',
+    ].join('\n');
+    const title = extractRunningTestTitle(chunk);
+    assert.strictEqual(title, 'Verify Single Calendar UI › Verify Popover Navigation Button');
+  });
+
+  test('returns undefined for non-line-reporter text', () => {
+    assert.strictEqual(extractRunningTestTitle('Starting Playwright CLI...'), undefined);
+    assert.strictEqual(extractRunningTestTitle(''), undefined);
   });
 });

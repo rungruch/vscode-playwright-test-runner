@@ -2,10 +2,11 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
-import { ArtifactRecord, CompanionFailure, CompanionRunSummary, UiProfile } from './core/companionTypes';
+import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem, UiProfile } from './core/companionTypes';
 import { ForcedInspectorBrowser, resolveInspectorBrowser } from './core/inspectorBrowser';
 import { dispatchManagedRun } from './core/managedRunDispatch';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
+import { buildShowReportArguments } from './core/reportServer';
 import {
   buildChangedUiArguments,
   buildCompanionTestArguments,
@@ -67,6 +68,7 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.selectConfig', (selection?: EditorTestSelection) => selectConfigCommand(deps, selection));
 
   register('playwrightCodeLensRunner.flakeLab', (selection?: EditorTestSelection | vscode.Uri) => flakeLabCommand(deps, selection));
+  register('playwrightCodeLensRunner.runCompanion', (selection?: EditorTestSelection | vscode.Uri) => companionRunCommand(deps, selection));
   register('playwrightCodeLensRunner.openChangedUi', (selection?: EditorTestSelection) => changedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.openLastFailedUi', (selection?: EditorTestSelection) => lastFailedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.tagActions', (selection?: EditorTestSelection) => tagActionsCommand(deps, selection));
@@ -186,9 +188,11 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     void vscode.window.showInformationMessage('No Playwright selection found at the current position.');
     return;
   }
+  const scopeLabel = resolved.kind === 'file' ? 'File' : resolved.kind === 'suite' ? 'Suite' : 'Test';
   const choices = [
     { label: '$(play) Run', description: 'Microsoft Testing', action: 'run' as const },
     { label: '$(debug) Debug', description: 'Microsoft Testing', action: 'debug' as const },
+    { label: `$(play) Run Companion ${scopeLabel}`, description: 'Companion CLI · normal run', action: 'companionRun' as const },
     ...(resolved.kind === 'file' ? [] : [{ label: '$(eye) Inspect', description: 'Companion CLI', action: 'inspect' as const }]),
     { label: '$(browser) Playwright UI', description: 'Companion CLI', action: 'ui' as const },
     { label: '$(beaker) Flake Lab', description: 'Companion CLI · repeat selected scope', action: 'flake' as const },
@@ -210,6 +214,8 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     await delegatedTestCommand(deps, resolved, 'run');
   } else if (picked.action === 'debug') {
     await delegatedTestCommand(deps, resolved, 'debug');
+  } else if (picked.action === 'companionRun') {
+    await companionRunCommand(deps, resolved);
   } else if (picked.action === 'inspect') {
     await interactiveCliCommand(deps, resolved, 'debug');
   } else if (picked.action === 'ui') {
@@ -365,26 +371,90 @@ async function flakeLabCommand(
     trace: settings.flakeLabTrace,
     failOnFlakyTests: settings.flakeLabFailOnFlakyTests,
   });
+  const initialTests = await initialTestsForSelection(deps, target, selection);
   await dispatchManagedRun({
     runsEnabled: settings.sidebarRunsEnabled,
     runInTerminal: () => runInTerminal(target, `Playwright Flake Lab: ${path.basename(selection.file)}`, args),
-    runManaged: async () => vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: `Playwright Flake Lab: ${path.basename(selection.file)}`,
-        cancellable: true,
-      },
-      async (_progress, token) => deps.runner.run(target, {
-        kind: 'flake-lab',
-        targetId: target.id,
-        cwd: target.cwd,
-        configFile: target.configFile,
-        args,
-        env: target.env,
-        selection: runSelection,
-        projects,
-      }, token),
-    ),
+    runManaged: async () => {
+      void focusCompanionFor(target);
+      return vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Playwright Flake Lab: ${path.basename(selection.file)}`,
+          cancellable: true,
+        },
+        async (_progress, token) => deps.runner.run(target, {
+          kind: 'flake-lab',
+          targetId: target.id,
+          cwd: target.cwd,
+          configFile: target.configFile,
+          args,
+          env: target.env,
+          selection: runSelection,
+          projects,
+          initialTests,
+        }, token),
+      );
+    },
+    afterManaged: async () => {
+      await deps.sidebar.refreshArtifacts(await currentTargets(deps));
+      await focusCompanionFor(target);
+    },
+  });
+}
+
+async function companionRunCommand(
+  deps: CommandDeps,
+  arg: EditorTestSelection | vscode.Uri | undefined,
+): Promise<void> {
+  const selection = isEditorSelection(arg)
+    ? arg
+    : isUri(arg)
+      ? await fileSelectionForUri(deps, arg)
+      : await selectionAtCursor(deps);
+  if (!selection) {
+    void vscode.window.showInformationMessage('Open a Playwright test file first.');
+    return;
+  }
+  const target = await targetForSelection(deps, selection);
+  if (!target) {
+    return;
+  }
+  const projects = await deps.projects.getProjects(target);
+  const runSelection = cliSelectionForEditor(selection);
+  const args = [
+    ...buildCompanionTestArguments(runSelection, {
+      configFile: target.configFile,
+      cwd: target.cwd,
+      projects,
+    }),
+    ...target.runOptions,
+  ];
+  const initialTests = await initialTestsForSelection(deps, target, selection);
+  await dispatchManagedRun({
+    runsEnabled: settingsFor(target).sidebarRunsEnabled,
+    runInTerminal: () => runInTerminal(target, `Playwright Companion Run: ${path.basename(selection.file)}`, args),
+    runManaged: async () => {
+      void focusCompanionFor(target);
+      return vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `Playwright Companion Run: ${path.basename(selection.file)}`,
+          cancellable: true,
+        },
+        async (_progress, token) => deps.runner.run(target, {
+          kind: 'companion-run',
+          targetId: target.id,
+          cwd: target.cwd,
+          configFile: target.configFile,
+          args,
+          env: target.env,
+          selection: runSelection,
+          projects,
+          initialTests,
+        }, token),
+      );
+    },
     afterManaged: async () => {
       await deps.sidebar.refreshArtifacts(await currentTargets(deps));
       await focusCompanionFor(target);
@@ -524,26 +594,37 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     }),
     ...target.runOptions,
   ];
+  const initialTests = latest.failures.map((f) => ({
+    id: `${f.file ?? ''}:${f.line ?? 1}:${f.title}`,
+    title: f.title,
+    file: f.file,
+    line: f.line,
+    status: 'pending' as const,
+  }));
   await dispatchManagedRun({
     runsEnabled: settingsFor(target).sidebarRunsEnabled,
     runInTerminal: () => runInTerminal(target, 'Playwright Rerun Failed', args),
-    runManaged: async () => vscode.window.withProgress(
-      {
-        location: vscode.ProgressLocation.Notification,
-        title: 'Playwright: rerun failed companion tests',
-        cancellable: true,
-      },
-      async (_progress, token) => deps.runner.run(target, {
-        kind: 'rerun-failed',
-        targetId: target.id,
-        cwd: target.cwd,
-        configFile: target.configFile,
-        args,
-        env: target.env,
-        selection,
-        projects,
-      }, token),
-    ),
+    runManaged: async () => {
+      void focusCompanionFor(target);
+      return vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Playwright: rerun failed companion tests',
+          cancellable: true,
+        },
+        async (_progress, token) => deps.runner.run(target, {
+          kind: 'rerun-failed',
+          targetId: target.id,
+          cwd: target.cwd,
+          configFile: target.configFile,
+          args,
+          env: target.env,
+          selection,
+          projects,
+          initialTests,
+        }, token),
+      );
+    },
     afterManaged: async () => {
       await deps.sidebar.refreshArtifacts(await currentTargets(deps));
       await focusCompanionFor(target);
@@ -601,7 +682,7 @@ async function openArtifactCommand(deps: CommandDeps, artifact: ArtifactRecord):
     return;
   }
   if (artifact.kind === 'report' || artifact.kind === 'report-zip') {
-    runInTerminal(target, 'Playwright Report', ['show-report', artifact.path]);
+    runInTerminal(target, 'Playwright Report', buildShowReportArguments(artifact.path));
   } else if (artifact.kind === 'trace') {
     runInTerminal(target, 'Playwright Trace', ['show-trace', artifact.path]);
   } else {
@@ -800,6 +881,7 @@ async function focusCompanionFor(target: RunTarget): Promise<void> {
 
 async function focusCompanionView(): Promise<void> {
   await vscode.commands.executeCommand('workbench.view.extension.playwrightCodeLensRunner');
+  await vscode.commands.executeCommand('playwrightCodeLensRunner.runsView.focus').then(undefined, () => undefined);
 }
 
 async function focusNativeResults(file: string | undefined): Promise<void> {
@@ -818,7 +900,7 @@ function scheduleNativeFocus(file: string): void {
 async function showReportCommand(deps: CommandDeps): Promise<void> {
   const target = await pickTarget(deps, 'Show HTML report for which Playwright config?');
   if (target) {
-    runInTerminal(target, 'Playwright Report', ['show-report']);
+    runInTerminal(target, 'Playwright Report', buildShowReportArguments());
   }
 }
 
@@ -1010,4 +1092,53 @@ function isUri(value: EditorTestSelection | vscode.Uri | undefined): value is vs
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function initialTestsForSelection(
+  deps: CommandDeps,
+  target: RunTarget,
+  selection: EditorTestSelection,
+): Promise<CompanionTestItem[] | undefined> {
+  try {
+    const model = await deps.discovery.discoverForFile(target, selection.file);
+    if (!model) {
+      return undefined;
+    }
+    const uri = selection.uri ?? vscode.Uri.file(selection.file).toString();
+    const selections = editorSelectionsForFile(model, selection.file, uri).filter((s) => s.kind === 'test');
+    if (selections.length === 0) {
+      return undefined;
+    }
+    const matched = selection.kind === 'file'
+      ? selections
+      : selections.filter((s) => isSelectionMatch(s, selection));
+    return selections.map((s) => {
+      const title = s.titlePath ? s.titlePath.join(' › ') : s.fullTitle ?? 'Playwright test';
+      const line = s.position.line + 1;
+      const isQueued = matched.length === 0 || matched.some((m) => isSelectionMatch(s, m));
+      return {
+        id: `${s.file}:${line}:${title}`,
+        title,
+        file: s.file,
+        line,
+        status: isQueued ? ('pending' as const) : ('skipped' as const),
+      };
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function isSelectionMatch(candidate: EditorTestSelection, target: EditorTestSelection): boolean {
+  if (candidate.file !== target.file) {
+    return false;
+  }
+  if (target.kind === 'test') {
+    return candidate.position.line === target.position.line
+      || Boolean(candidate.titlePath && target.titlePath && candidate.titlePath.join(' › ') === target.titlePath.join(' › '));
+  }
+  if (target.kind === 'suite' && candidate.titlePath && target.titlePath) {
+    return target.titlePath.every((seg, i) => candidate.titlePath?.[i] === seg);
+  }
+  return true;
 }

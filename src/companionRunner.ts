@@ -2,8 +2,8 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { parseCompanionJsonReport, withParsedReport } from './core/companionReport';
-import { CompanionCliRunRequest, CompanionRunSummary } from './core/companionTypes';
+import { extractRunningTestTitle, isTitleMatch, parseCompanionJsonReport, withParsedReport } from './core/companionReport';
+import { CompanionCliRunRequest, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 
@@ -33,6 +33,7 @@ export class CompanionCliRunner implements vscode.Disposable {
   async run(target: RunTarget, request: CompanionCliRunRequest, cancellation?: vscode.CancellationToken): Promise<CompanionRunSummary> {
     const startedAt = request.startedAt ?? Date.now();
     const id = `${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
+    const initialTests = request.initialTests ?? [];
     let summary: CompanionRunSummary = {
       id,
       kind: request.kind,
@@ -42,7 +43,7 @@ export class CompanionCliRunner implements vscode.Disposable {
       status: 'running',
       startedAt,
       durationMs: 0,
-      total: 0,
+      total: initialTests.length,
       passed: 0,
       failed: 0,
       skipped: 0,
@@ -51,6 +52,7 @@ export class CompanionCliRunner implements vscode.Disposable {
       args: request.args,
       selection: request.selection,
       projects: request.projects,
+      tests: initialTests.length > 0 ? initialTests.map((t) => ({ ...t })) : undefined,
     };
     await this.persist(summary);
     this.output.appendLine(`\n[${new Date(startedAt).toLocaleTimeString()}] ${request.kind} — ${target.configFile ?? target.cwd}`);
@@ -61,6 +63,18 @@ export class CompanionCliRunner implements vscode.Disposable {
     const append = (text: string) => {
       collectedOutput = trimOutput(`${collectedOutput}${text}`);
       this.output.append(text);
+      const currentTest = extractRunningTestTitle(text);
+      if (currentTest && currentTest !== summary.currentTest) {
+        const updatedTests = updateRunningTests(summary.tests ?? [], currentTest);
+        summary = {
+          ...summary,
+          currentTest,
+          durationMs: Date.now() - startedAt,
+          tests: updatedTests,
+        };
+        this.latest = summary;
+        this.emitter.fire(summary);
+      }
     };
     try {
       tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'playwright-codelens-run-'));
@@ -81,6 +95,9 @@ export class CompanionCliRunner implements vscode.Disposable {
       const outcome = await running.outcome;
       const report = await readResult(resultFile) ?? collectedOutput;
       summary = withParsedReport(summary, parseCompanionJsonReport(report));
+      if (outcome.cancelled && summary.tests) {
+        summary.tests = summary.tests.map((t) => (t.status === 'running' ? { ...t, status: 'pending' as const } : t));
+      }
       summary = {
         ...summary,
         durationMs: Math.max(summary.durationMs, Date.now() - startedAt),
@@ -155,4 +172,30 @@ async function readResult(file: string): Promise<string | undefined> {
 
 function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
+}
+
+function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): CompanionTestItem[] {
+  const result: CompanionTestItem[] = tests.map((t) => ({ ...t }));
+  for (const t of result) {
+    if (t.status === 'running') {
+      t.status = 'passed';
+    }
+  }
+  let matched = false;
+  for (const t of result) {
+    if (isTitleMatch(t.title, runningTitle)) {
+      t.status = 'running';
+      t.title = runningTitle;
+      matched = true;
+      break;
+    }
+  }
+  if (!matched) {
+    result.push({
+      id: runningTitle,
+      title: runningTitle,
+      status: 'running',
+    });
+  }
+  return result;
 }

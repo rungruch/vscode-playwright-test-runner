@@ -52,9 +52,19 @@ export function suiteTitleFilter(titlePath: string | readonly string[], file: st
 }
 
 function filterTitlePath(titlePath: string | readonly string[], file: string): string {
-  const titles = typeof titlePath === 'string' ? [titlePath] : titlePath;
+  const rawTitles = typeof titlePath === 'string' ? [titlePath] : titlePath;
   const portableFile = file.replaceAll('\\', '/');
   const fileName = portableFile.slice(portableFile.lastIndexOf('/') + 1);
+  const isFileTitle = (t: string) => {
+    if (!t || !t.trim()) {
+      return true;
+    }
+    const norm = t.replaceAll('\\', '/');
+    const normBase = norm.slice(norm.lastIndexOf('/') + 1);
+    return norm === portableFile || normBase === fileName || norm.endsWith(`/${fileName}`);
+  };
+  const cleanTitles = rawTitles.filter((t) => !isFileTitle(t));
+  const titles = cleanTitles.length > 0 ? cleanTitles : rawTitles.filter((t) => t.length > 0);
   const prefix = `(?:^|[\\s/\\\\])${escapeRegExp(fileName)}${TITLE_SEPARATOR}`;
   return `${prefix}${titles.map(escapeRegExp).join(TITLE_SEPARATOR)}`;
 }

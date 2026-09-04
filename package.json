@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.2.0",
+  "version": "3.3.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -434,64 +434,82 @@
         "category": "Playwright"
       },
       {
+        "command": "playwrightCodeLensRunner.runCompanion",
+        "title": "Run Companion Test (Normal CLI Run)",
+        "category": "Playwright",
+        "icon": "$(play)"
+      },
+      {
         "command": "playwrightCodeLensRunner.openRunsView",
         "title": "Open Playwright Runs",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(list-flat)"
       },
       {
         "command": "playwrightCodeLensRunner.rerunFailedCli",
         "title": "Rerun Failed Companion Tests",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(refresh)"
       },
       {
         "command": "playwrightCodeLensRunner.openArtifactCenter",
-        "title": "Open Playwright Artifact Center",
-        "category": "Playwright"
+        "title": "Refresh Playwright Artifacts",
+        "category": "Playwright",
+        "icon": "$(refresh)"
       },
       {
         "command": "playwrightCodeLensRunner.openLatestReport",
         "title": "Open Latest Playwright Report",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(globe)"
       },
       {
         "command": "playwrightCodeLensRunner.openLatestTrace",
         "title": "Open Latest Playwright Trace",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(pulse)"
       },
       {
         "command": "playwrightCodeLensRunner.mergeBlobReports",
         "title": "Merge Playwright Blob Reports",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(archive)"
       },
       {
         "command": "playwrightCodeLensRunner.openUiProfile",
         "title": "Open Playwright UI Profile…",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(remote)"
       },
       {
         "command": "playwrightCodeLensRunner.showCompanionOutput",
         "title": "Show Playwright Companion Output",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(output)"
       },
       {
         "command": "playwrightCodeLensRunner.openMicrosoftTesting",
         "title": "Open Microsoft Playwright Testing",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(beaker)"
       },
       {
         "command": "playwrightCodeLensRunner.openArtifact",
         "title": "Open Playwright Artifact",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(eye)"
       },
       {
         "command": "playwrightCodeLensRunner.revealArtifact",
         "title": "Reveal Playwright Artifact",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(folder)"
       },
       {
         "command": "playwrightCodeLensRunner.openFailure",
         "title": "Open Playwright Companion Failure",
-        "category": "Playwright"
+        "category": "Playwright",
+        "icon": "$(go-to-file)"
       }
     ],
     "viewsContainers": {
@@ -519,14 +537,24 @@
     "menus": {
       "view/title": [
         {
-          "command": "playwrightCodeLensRunner.openRunsView",
+          "command": "playwrightCodeLensRunner.rerunFailedCli",
           "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
           "group": "navigation@1"
         },
         {
-          "command": "playwrightCodeLensRunner.rerunFailedCli",
+          "command": "playwrightCodeLensRunner.flakeLab",
           "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
           "group": "navigation@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.showCompanionOutput",
+          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "group": "navigation@3"
+        },
+        {
+          "command": "playwrightCodeLensRunner.openMicrosoftTesting",
+          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "group": "navigation@4"
         },
         {
           "command": "playwrightCodeLensRunner.openArtifactCenter",
@@ -534,12 +562,42 @@
           "group": "navigation@1"
         },
         {
-          "command": "playwrightCodeLensRunner.mergeBlobReports",
+          "command": "playwrightCodeLensRunner.openLatestReport",
           "when": "view == playwrightCodeLensRunner.artifactsView",
           "group": "navigation@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.openLatestTrace",
+          "when": "view == playwrightCodeLensRunner.artifactsView",
+          "group": "navigation@3"
+        },
+        {
+          "command": "playwrightCodeLensRunner.mergeBlobReports",
+          "when": "view == playwrightCodeLensRunner.artifactsView",
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [
+        {
+          "command": "playwrightCodeLensRunner.rerunFailedCli",
+          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionRun",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.showCompanionOutput",
+          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionRun",
+          "group": "inline@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.openFailure",
+          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionFailure",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.openArtifact",
+          "when": "view == playwrightCodeLensRunner.artifactsView && viewItem =~ /^playwrightArtifact\\./",
+          "group": "inline@1"
+        },
         {
           "command": "playwrightCodeLensRunner.revealArtifact",
           "when": "view == playwrightCodeLensRunner.artifactsView && viewItem =~ /^playwrightArtifact\\./",
