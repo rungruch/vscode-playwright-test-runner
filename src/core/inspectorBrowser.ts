@@ -1,21 +1,21 @@
-export type InspectorBrowser = 'config' | 'chromium' | 'firefox' | 'webkit';
-export type ForcedInspectorBrowser = Exclude<InspectorBrowser, 'config'>;
+export type BrowserPreference = 'config' | 'chromium' | 'firefox' | 'webkit';
+export type ForcedBrowser = Exclude<BrowserPreference, 'config'>;
 
-export interface InspectorBrowserResolution {
+export interface BrowserResolution {
   projects: string[];
-  browser?: ForcedInspectorBrowser;
+  browser?: ForcedBrowser;
   error?: string;
 }
 
 /**
- * Resolves an Inspector-only browser preference without passing Playwright's
- * incompatible `--browser` and configured-project options together.
+ * Resolves a browser preference without passing Playwright's incompatible
+ * `--browser` and configured-project options together.
  */
-export function resolveInspectorBrowser(
-  preference: InspectorBrowser,
+export function resolveBrowserPreference(
+  preference: BrowserPreference,
   selectedProjects: readonly string[],
   availableProjects: readonly string[] | undefined,
-): InspectorBrowserResolution {
+): BrowserResolution {
   if (preference === 'config') {
     return { projects: [...selectedProjects] };
   }
@@ -27,11 +27,29 @@ export function resolveInspectorBrowser(
     };
   }
 
-  const matchingProject = availableProjects.find(
-    (project) => project.toLocaleLowerCase() === preference,
+  const prefLower = preference.toLocaleLowerCase();
+  const exactMatch = availableProjects.find(
+    (project) => project.toLocaleLowerCase() === prefLower,
   );
-  if (matchingProject) {
-    return { projects: [matchingProject] };
+  if (exactMatch) {
+    return { projects: [exactMatch] };
+  }
+
+  const aliasMatch = availableProjects.find((project) => {
+    const lower = project.toLocaleLowerCase();
+    if (prefLower === 'chromium') {
+      return lower === 'chrome' || lower.includes('chromium') || lower.includes('chrome');
+    }
+    if (prefLower === 'firefox') {
+      return lower.includes('firefox');
+    }
+    if (prefLower === 'webkit') {
+      return lower === 'safari' || lower.includes('webkit') || lower.includes('safari');
+    }
+    return false;
+  });
+  if (aliasMatch) {
+    return { projects: [aliasMatch] };
   }
 
   if (availableProjects.length === 0) {
@@ -44,6 +62,7 @@ export function resolveInspectorBrowser(
   };
 }
 
-export function isInspectorBrowser(value: string): value is InspectorBrowser {
+export function isBrowserPreference(value: string): value is BrowserPreference {
   return value === 'config' || value === 'chromium' || value === 'firefox' || value === 'webkit';
 }
+

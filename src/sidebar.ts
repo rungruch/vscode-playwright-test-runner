@@ -7,11 +7,12 @@ import { InteractiveSession, InteractiveSessionManager } from './interactiveSess
 import { RunTarget } from './runTarget';
 
 type RunElement =
-  | { type: 'run'; run: CompanionRunSummary }
+  | { type: 'run'; run: CompanionRunSummary; isLatest?: boolean }
+  | { type: 'historyGroup'; runs: readonly CompanionRunSummary[] }
   | { type: 'testCase'; test: CompanionTestItem }
   | { type: 'failure'; failure: CompanionFailure }
   | { type: 'session'; session: InteractiveSession }
-  | { type: 'action'; label: string; command: string; icon: string };
+  | { type: 'action'; label: string; command: string; icon: string; args?: unknown[] };
 
 /** Tree providers for the companion-only run summary and local artifacts. */
 export class PlaywrightSidebar implements vscode.Disposable {
@@ -61,8 +62,8 @@ export class PlaywrightSidebar implements vscode.Disposable {
 
   private runChildren(element?: RunElement): RunElement[] {
     if (!element) {
-      const run = this.runner.latestRun;
-      if (!run) {
+      const runs = this.runner.runs;
+      if (runs.length === 0) {
         return [
           ...this.sessions.sessions.map((session) => ({ type: 'session' as const, session })),
           { type: 'action', label: 'No companion CLI runs yet', command: 'playwrightCodeLensRunner.openMicrosoftTesting', icon: 'beaker' },
@@ -70,14 +71,25 @@ export class PlaywrightSidebar implements vscode.Disposable {
           { type: 'action', label: 'Show Companion Output', command: 'playwrightCodeLensRunner.showCompanionOutput', icon: 'output' },
         ];
       }
-      return [
-        { type: 'run', run },
+      const latest = runs[0];
+      const previousRuns = runs.slice(1);
+      const items: RunElement[] = [
+        { type: 'run', run: latest, isLatest: true },
+      ];
+      if (previousRuns.length > 0) {
+        items.push({ type: 'historyGroup', runs: previousRuns });
+      }
+      items.push(
         ...this.sessions.sessions.map((session) => ({ type: 'session' as const, session })),
         { type: 'action', label: 'Open Browser Report', command: 'playwrightCodeLensRunner.openLatestReport', icon: 'globe' },
         { type: 'action', label: 'Open UI Profile…', command: 'playwrightCodeLensRunner.openUiProfile', icon: 'remote' },
         { type: 'action', label: 'Open Microsoft Testing', command: 'playwrightCodeLensRunner.openMicrosoftTesting', icon: 'beaker' },
         { type: 'action', label: 'Show Companion Output', command: 'playwrightCodeLensRunner.showCompanionOutput', icon: 'output' },
-      ];
+      );
+      return items;
+    }
+    if (element.type === 'historyGroup') {
+      return element.runs.map((run) => ({ type: 'run' as const, run, isLatest: false }));
     }
     if (element.type === 'run') {
       const run = element.run;
@@ -88,6 +100,12 @@ export class PlaywrightSidebar implements vscode.Disposable {
         command: 'playwrightCodeLensRunner.openRunsView',
         icon: run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error',
       });
+      totals.push({
+        type: 'action',
+        label: 'View CLI Output',
+        command: 'playwrightCodeLensRunner.showCompanionOutput',
+        icon: 'output',
+      });
       if (run.tests && run.tests.length > 0) {
         totals.push(...run.tests.map((test) => ({ type: 'testCase' as const, test })));
       } else if (run.failures.length > 0) {
@@ -96,24 +114,34 @@ export class PlaywrightSidebar implements vscode.Disposable {
       if (run.failed > 0) {
         totals.push({ type: 'action', label: 'Rerun Failed', command: 'playwrightCodeLensRunner.rerunFailedCli', icon: 'refresh' });
       }
+      if (run.status === 'running') {
+        totals.push({ type: 'action', label: 'Cancel Run', command: 'playwrightCodeLensRunner.cancelCompanionRun', icon: 'stop' });
+      }
       return totals;
     }
     return [];
   }
 
   private runTreeItem(element: RunElement): vscode.TreeItem {
+    if (element.type === 'historyGroup') {
+      const item = new vscode.TreeItem(`Previous Runs (${element.runs.length})`, vscode.TreeItemCollapsibleState.Collapsed);
+      item.iconPath = new vscode.ThemeIcon('history');
+      item.contextValue = 'playwrightRunHistoryGroup';
+      return item;
+    }
     if (element.type === 'run') {
       const run = element.run;
       const kindLabel = run.kind === 'flake-lab' ? 'Flake Lab' : run.kind === 'companion-run' ? 'Companion run' : 'failed-test rerun';
       const targetFile = run.selection?.files?.[0];
       const fileBasename = targetFile ? ` (${path.basename(targetFile)})` : '';
-      const isExpanded = Boolean((run.tests && run.tests.length > 0) || run.failures.length > 0 || run.status === 'running');
+      const isExpanded = Boolean(element.isLatest !== false && ((run.tests && run.tests.length > 0) || run.failures.length > 0 || run.status === 'running'));
+      const prefix = element.isLatest === false ? 'Run' : 'Latest';
       const item = new vscode.TreeItem(
-        `Latest ${kindLabel}${fileBasename}`,
+        `${prefix} ${kindLabel}${fileBasename}`,
         isExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
       );
-      item.description = run.status === 'running' && run.currentTest
-        ? `running · ${run.currentTest}`
+      item.description = run.status === 'running'
+        ? (run.currentTest ? `running · ${run.currentTest}` : 'running…')
         : `${run.status} · ${formatDuration(run.durationMs)}`;
       const startedStr = new Date(run.startedAt).toLocaleTimeString();
       item.tooltip = new vscode.MarkdownString(
@@ -125,10 +153,11 @@ export class PlaywrightSidebar implements vscode.Disposable {
         `- **Failed**: ${run.failed}\n` +
         `- **Flaky**: ${run.flaky}\n` +
         `- **Skipped**: ${run.skipped}\n` +
-        (run.configFile ? `- **Config**: \`${path.basename(run.configFile)}\`` : ''),
+        (run.configFile ? `- **Config**: \`${path.basename(run.configFile)}\`\n` : '') +
+        (run.projects && run.projects.length > 0 ? `- **Projects**: ${run.projects.join(', ')}\n` : ''),
       );
       item.iconPath = new vscode.ThemeIcon(run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error');
-      item.contextValue = 'playwrightCompanionRun';
+      item.contextValue = run.status === 'running' ? 'playwrightCompanionRun.running' : 'playwrightCompanionRun';
       return item;
     }
     if (element.type === 'testCase') {
@@ -196,7 +225,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
       return item;
     }
     const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
-    item.command = { command: element.command, title: element.label };
+    item.command = { command: element.command, title: element.label, arguments: element.args };
     item.iconPath = new vscode.ThemeIcon(element.icon);
     item.contextValue = 'playwrightCompanionAction';
     return item;

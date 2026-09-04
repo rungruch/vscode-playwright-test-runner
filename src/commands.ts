@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
 import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem, UiProfile } from './core/companionTypes';
-import { ForcedInspectorBrowser, resolveInspectorBrowser } from './core/inspectorBrowser';
+import { ForcedBrowser, resolveBrowserPreference } from './core/inspectorBrowser';
 import { dispatchManagedRun } from './core/managedRunDispatch';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import { buildShowReportArguments } from './core/reportServer';
@@ -68,7 +68,12 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.selectConfig', (selection?: EditorTestSelection) => selectConfigCommand(deps, selection));
 
   register('playwrightCodeLensRunner.flakeLab', (selection?: EditorTestSelection | vscode.Uri) => flakeLabCommand(deps, selection));
+  register('playwrightCodeLensRunner.flakeLabWithSize', (selection?: EditorTestSelection | vscode.Uri) => flakeLabWithSizeCommand(deps, selection));
   register('playwrightCodeLensRunner.runCompanion', (selection?: EditorTestSelection | vscode.Uri) => companionRunCommand(deps, selection));
+  register('playwrightCodeLensRunner.cancelCompanionRun', () => cancelCompanionRunCommand(deps));
+  register('playwrightCodeLensRunner.clearRuns', () => clearRunsCommand(deps));
+  register('playwrightCodeLensRunner.runSingleCompanionTest', (arg?: unknown) => runSingleCompanionTestCommand(deps, arg));
+  register('playwrightCodeLensRunner.flakeSingleCompanionTest', (arg?: unknown) => flakeSingleCompanionTestCommand(deps, arg));
   register('playwrightCodeLensRunner.openChangedUi', (selection?: EditorTestSelection) => changedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.openLastFailedUi', (selection?: EditorTestSelection) => lastFailedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.tagActions', (selection?: EditorTestSelection) => tagActionsCommand(deps, selection));
@@ -143,13 +148,13 @@ async function interactiveCliCommand(
     return;
   }
   let projects = await deps.projects.getProjects(target);
-  let browser: ForcedInspectorBrowser | undefined;
+  let browser: ForcedBrowser | undefined;
   if (mode === 'debug') {
     const preference = new Settings(vscode.Uri.file(selection.file)).inspectorBrowser;
     const model = preference === 'config'
       ? deps.discovery.cachedModel(target.id)
       : deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
-    const resolved = resolveInspectorBrowser(preference, projects, model?.projects);
+    const resolved = resolveBrowserPreference(preference, projects, model?.projects);
     if (resolved.error) {
       void vscode.window.showErrorMessage(
         `${resolved.error} Choose "config" in playwrightCodeLensRunner.inspector.browser or add the matching project.`,
@@ -196,6 +201,7 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     ...(resolved.kind === 'file' ? [] : [{ label: '$(eye) Inspect', description: 'Companion CLI', action: 'inspect' as const }]),
     { label: '$(browser) Playwright UI', description: 'Companion CLI', action: 'ui' as const },
     { label: '$(beaker) Flake Lab', description: 'Companion CLI · repeat selected scope', action: 'flake' as const },
+    { label: '$(beaker) Flake Lab with Size…', description: 'Companion CLI · select repetition preset', action: 'flakeWithSize' as const },
     { label: '$(git-compare) Open Changed Tests in Playwright UI', description: 'Companion CLI', action: 'changed' as const },
     { label: '$(history) Open Last Failed Tests in Playwright UI', description: 'Companion CLI', action: 'lastFailed' as const },
     { label: '$(tag) Tag actions…', description: 'Companion CLI', action: 'tags' as const },
@@ -222,6 +228,8 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     await interactiveCliCommand(deps, resolved, 'ui');
   } else if (picked.action === 'flake') {
     await flakeLabCommand(deps, resolved);
+  } else if (picked.action === 'flakeWithSize') {
+    await flakeLabWithSizeCommand(deps, resolved);
   } else if (picked.action === 'changed') {
     await changedUiCommand(deps, resolved);
   } else if (picked.action === 'lastFailed') {
@@ -331,9 +339,15 @@ async function selectConfigCommand(deps: CommandDeps, selection: EditorTestSelec
   await deps.discovery.selectTargetForFile(uri.fsPath);
 }
 
+interface FlakeLabCommandOptions {
+  size?: string;
+  repeatEach?: number;
+}
+
 async function flakeLabCommand(
   deps: CommandDeps,
   arg: EditorTestSelection | vscode.Uri | undefined,
+  options?: FlakeLabCommandOptions,
 ): Promise<void> {
   const selection = isEditorSelection(arg)
     ? arg
@@ -358,20 +372,48 @@ async function flakeLabCommand(
       return;
     }
   }
-  const projects = await deps.projects.getProjects(target);
+  let projects = await deps.projects.getProjects(target);
+  let browser: ForcedBrowser | undefined;
+  if (settings.flakeLabBrowser !== 'config') {
+    const model = deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
+    const resolved = resolveBrowserPreference(settings.flakeLabBrowser, projects, model?.projects);
+    if (resolved.error) {
+      void vscode.window.showErrorMessage(
+        `${resolved.error} Choose "config" in playwrightCodeLensRunner.flakeLab.browser or add the matching project.`,
+      );
+      return;
+    }
+    projects = resolved.projects;
+    browser = resolved.browser;
+  }
+  const repeatEach = options?.repeatEach ?? settings.resolvedFlakeLabRepeatEach(options?.size);
+  const initialTests = await initialTestsForSelection(deps, target, selection);
+  const selectedCount = initialTests
+    ? initialTests.filter((t) => t.status === 'pending').length
+    : (selection.kind === 'test' ? 1 : 0);
+  if (settings.flakeLabMaxScopeTests > 0 && selectedCount > settings.flakeLabMaxScopeTests) {
+    const confirm = await vscode.window.showWarningMessage(
+      `Flake Lab scope contains ${selectedCount} tests (${selectedCount * repeatEach} total test iterations with repeatEach=${repeatEach}). Do you want to continue?`,
+      { modal: true },
+      'Run Flake Lab',
+    );
+    if (confirm !== 'Run Flake Lab') {
+      return;
+    }
+  }
   const runSelection = cliSelectionForEditor(selection);
   const args = buildFlakeLabArguments(runSelection, {
     configFile: target.configFile,
     cwd: target.cwd,
     projects,
+    browser,
     extraOptions: target.runOptions,
-    repeatEach: settings.flakeLabRepeatEach,
+    repeatEach,
     workers: settings.flakeLabWorkers,
     retries: settings.flakeLabRetries,
     trace: settings.flakeLabTrace,
     failOnFlakyTests: settings.flakeLabFailOnFlakyTests,
   });
-  const initialTests = await initialTestsForSelection(deps, target, selection);
   await dispatchManagedRun({
     runsEnabled: settings.sidebarRunsEnabled,
     runInTerminal: () => runInTerminal(target, `Playwright Flake Lab: ${path.basename(selection.file)}`, args),
@@ -403,6 +445,81 @@ async function flakeLabCommand(
   });
 }
 
+async function flakeLabWithSizeCommand(
+  deps: CommandDeps,
+  selection: EditorTestSelection | vscode.Uri | undefined,
+): Promise<void> {
+  const picked = await vscode.window.showQuickPick([
+    { label: '$(zap) Quick', description: '3 repetitions', size: 'quick' as const },
+    { label: '$(beaker) Standard', description: '10 repetitions', size: 'standard' as const },
+    { label: '$(flame) Deep Stress Test', description: '25 repetitions', size: 'deep' as const },
+    { label: '$(edit) Custom repetitions…', description: 'Specify exact repeat count', size: 'custom' as const },
+  ], { title: 'Select Flake Lab Size' });
+  if (!picked) {
+    return;
+  }
+  let repeatEach: number | undefined;
+  if (picked.size === 'custom') {
+    const input = await vscode.window.showInputBox({
+      title: 'Custom Flake Lab Repetitions',
+      prompt: 'Enter number of repetitions (e.g. 5, 20, 50)',
+      validateInput: (val) => {
+        const num = Number(val);
+        return Number.isInteger(num) && num > 0 ? undefined : 'Enter a positive integer';
+      },
+    });
+    if (!input) {
+      return;
+    }
+    repeatEach = Number(input);
+  }
+  await flakeLabCommand(deps, selection, { size: picked.size, repeatEach });
+}
+
+function cancelCompanionRunCommand(deps: CommandDeps): void {
+  deps.runner.cancel();
+}
+
+async function clearRunsCommand(deps: CommandDeps): Promise<void> {
+  await deps.runner.clearRuns();
+  deps.sidebar.refreshRuns();
+}
+
+async function runSingleCompanionTestCommand(deps: CommandDeps, arg?: unknown): Promise<void> {
+  const selection = testSelectionFromTreeArg(arg);
+  if (selection) {
+    await companionRunCommand(deps, selection);
+  }
+}
+
+async function flakeSingleCompanionTestCommand(deps: CommandDeps, arg?: unknown): Promise<void> {
+  const selection = testSelectionFromTreeArg(arg);
+  if (selection) {
+    await flakeLabCommand(deps, selection);
+  }
+}
+
+function testSelectionFromTreeArg(arg: unknown): EditorTestSelection | undefined {
+  if (!arg || typeof arg !== 'object') {
+    return undefined;
+  }
+  if ('test' in arg) {
+    const test = (arg as { test?: CompanionTestItem }).test;
+    if (test?.file) {
+      return {
+        kind: 'test',
+        targetId: '',
+        uri: vscode.Uri.file(test.file).toString(),
+        file: test.file,
+        fullTitle: test.title,
+        position: { line: Math.max(0, (test.line ?? 1) - 1), character: 0 },
+        titlePaths: [test.title.split(' › ')],
+      };
+    }
+  }
+  return undefined;
+}
+
 async function companionRunCommand(
   deps: CommandDeps,
   arg: EditorTestSelection | vscode.Uri | undefined,
@@ -420,13 +537,28 @@ async function companionRunCommand(
   if (!target) {
     return;
   }
-  const projects = await deps.projects.getProjects(target);
+  const settings = settingsFor(target);
+  let projects = await deps.projects.getProjects(target);
+  let browser: ForcedBrowser | undefined;
+  if (settings.companionBrowser !== 'config') {
+    const model = deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
+    const resolved = resolveBrowserPreference(settings.companionBrowser, projects, model?.projects);
+    if (resolved.error) {
+      void vscode.window.showErrorMessage(
+        `${resolved.error} Choose "config" in playwrightCodeLensRunner.companion.browser or add the matching project.`,
+      );
+      return;
+    }
+    projects = resolved.projects;
+    browser = resolved.browser;
+  }
   const runSelection = cliSelectionForEditor(selection);
   const args = [
     ...buildCompanionTestArguments(runSelection, {
       configFile: target.configFile,
       cwd: target.cwd,
       projects,
+      browser,
     }),
     ...target.runOptions,
   ];

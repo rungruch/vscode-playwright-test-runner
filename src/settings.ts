@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { UiProfile } from './core/companionTypes';
 import { normalizeUiProfiles } from './core/uiProfiles';
-import { InspectorBrowser, isInspectorBrowser } from './core/inspectorBrowser';
+import { BrowserPreference, isBrowserPreference } from './core/inspectorBrowser';
+import { FlakeLabSizePreset, resolveFlakeLabRepeatEach } from './core/runArguments';
 
 /** Public configuration namespace for the extension. */
 export const SETTINGS_NAMESPACE = 'playwrightCodeLensRunner';
@@ -10,6 +11,9 @@ const DEFAULT_CODE_LENS_PATTERN = '**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,c
 
 export type CodeLensLayout = 'full' | 'compact' | 'custom';
 export type CodeLensAction = 'run' | 'debug' | 'inspect' | 'ui' | 'config' | 'cases' | 'more';
+export type CompanionShowCliOutput = 'on-run' | 'on-failure' | 'never';
+export type InspectorBrowser = BrowserPreference;
+export { FlakeLabSizePreset };
 
 const ACTIONS_BY_KIND: Record<'file' | 'suite' | 'test', readonly CodeLensAction[]> = {
   file: ['run', 'debug', 'ui', 'config', 'more'],
@@ -57,10 +61,93 @@ export class Settings {
     return this.configuration().get<string[]>('runOptions', []);
   }
 
-  /** Browser/project override applied only to Playwright Inspector commands. */
+  /**
+   * Top-level browser preference for all Playwright runs (companion CLI, Flake Lab, Inspector).
+   * Also checks legacy `playwrightrunner.playwrightRunProject` if set to a supported browser.
+   */
+  get browser(): BrowserPreference {
+    const value = this.configuration().get<string>('browser', 'config');
+    if (isBrowserPreference(value) && value !== 'config') {
+      return value;
+    }
+    const legacy = vscode.workspace.getConfiguration('playwrightrunner', this.resource).get<string>('playwrightRunProject', '');
+    if (isBrowserPreference(legacy) && legacy !== 'config') {
+      return legacy;
+    }
+    return 'config';
+  }
+
+  /** Browser/project override applied to Playwright Inspector commands. */
   get inspectorBrowser(): InspectorBrowser {
     const value = this.configuration().get<string>('inspector.browser', 'config');
-    return isInspectorBrowser(value) ? value : 'config';
+    if (isBrowserPreference(value) && value !== 'config') {
+      return value;
+    }
+    if (this.browser !== 'config') {
+      return this.browser;
+    }
+    const companion = this.configuration().get<string>('companion.browser', 'config');
+    if (isBrowserPreference(companion) && companion !== 'config') {
+      return companion;
+    }
+    const flake = this.configuration().get<string>('flakeLab.browser', 'config');
+    if (isBrowserPreference(flake) && flake !== 'config') {
+      return flake;
+    }
+    return 'config';
+  }
+
+  get companionShowCliOutput(): CompanionShowCliOutput {
+    const value = this.configuration().get<string>('companion.showCliOutput', 'on-run');
+    return value === 'on-failure' || value === 'never' ? value : 'on-run';
+  }
+
+  get companionBrowser(): BrowserPreference {
+    const value = this.configuration().get<string>('companion.browser', 'config');
+    if (isBrowserPreference(value) && value !== 'config') {
+      return value;
+    }
+    if (this.browser !== 'config') {
+      return this.browser;
+    }
+    const flake = this.configuration().get<string>('flakeLab.browser', 'config');
+    if (isBrowserPreference(flake) && flake !== 'config') {
+      return flake;
+    }
+    const inspector = this.configuration().get<string>('inspector.browser', 'config');
+    if (isBrowserPreference(inspector) && inspector !== 'config') {
+      return inspector;
+    }
+    return 'config';
+  }
+
+  get flakeLabBrowser(): BrowserPreference {
+    const value = this.configuration().get<string>('flakeLab.browser', 'config');
+    if (isBrowserPreference(value) && value !== 'config') {
+      return value;
+    }
+    if (this.browser !== 'config') {
+      return this.browser;
+    }
+    const companion = this.configuration().get<string>('companion.browser', 'config');
+    if (isBrowserPreference(companion) && companion !== 'config') {
+      return companion;
+    }
+    const inspector = this.configuration().get<string>('inspector.browser', 'config');
+    if (isBrowserPreference(inspector) && inspector !== 'config') {
+      return inspector;
+    }
+    return 'config';
+  }
+
+  get flakeLabSize(): FlakeLabSizePreset {
+    const value = this.configuration().get<string>('flakeLab.size', 'standard');
+    return value === 'quick' || value === 'deep' || value === 'custom' ? value : 'standard';
+  }
+
+  get flakeLabMaxScopeTests(): number {
+    const value = this.configuration().get<number>('flakeLab.maxScopeTests', 15);
+    return Number.isInteger(value) && value >= 0 ? value : 15;
   }
 
   get environment(): Record<string, string> {
@@ -88,6 +175,10 @@ export class Settings {
     return this.configuration().get<boolean>('flakeLab.failOnFlakyTests', true);
   }
 
+  resolvedFlakeLabRepeatEach(sizeOverride?: string): number {
+    return resolveFlakeLabRepeatEach(sizeOverride ?? this.flakeLabSize, this.flakeLabRepeatEach);
+  }
+
   get uiProfiles(): UiProfile[] {
     return normalizeUiProfiles(this.configuration().get<unknown>('ui.profiles', []));
   }
@@ -103,6 +194,10 @@ export class Settings {
 
   get sidebarRunsEnabled(): boolean {
     return this.configuration().get<boolean>('sidebar.runsEnabled', true);
+  }
+
+  get sidebarHistorySize(): number {
+    return clampInteger(this.configuration().get<number>('sidebar.historySize', 3), 1, 10, 3);
   }
 
   get artifactScanDirectories(): string[] {

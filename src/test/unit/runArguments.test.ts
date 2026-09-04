@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import {
+  buildCompanionTestArguments,
   buildDebugArguments,
   buildDiscoveryArguments,
   buildChangedUiArguments,
@@ -10,6 +11,7 @@ import {
   combineFilters,
   escapeRegExp,
   fullTitleFilter,
+  resolveFlakeLabRepeatEach,
   suiteTitleFilter,
 } from '../../core/runArguments';
 
@@ -244,6 +246,34 @@ suite('runArguments', () => {
     );
   });
 
+  test('builds companion and Flake Lab arguments with forced browser flag when no projects configured', () => {
+    assert.deepStrictEqual(
+      buildCompanionTestArguments(
+        { files: ['/ws/tests/login.spec.ts'], titleFilters: [] },
+        { cwd: '/ws', browser: 'firefox' },
+      ),
+      ['test', 'tests/login\\.spec\\.ts', '--browser=firefox'],
+    );
+    assert.deepStrictEqual(
+      buildFlakeLabArguments(
+        { files: ['/ws/tests/login.spec.ts'], titleFilters: [] },
+        {
+          cwd: '/ws',
+          browser: 'webkit',
+          repeatEach: 3,
+          workers: 1,
+          retries: 0,
+          trace: 'off',
+          failOnFlakyTests: false,
+        },
+      ),
+      [
+        'test', 'tests/login\\.spec\\.ts', '--browser=webkit',
+        '--repeat-each', '3', '--workers', '1', '--retries', '0', '--trace', 'off',
+      ],
+    );
+  });
+
   test('builds target-scoped changed and last-failed UI arguments', () => {
     const options = {
       configFile: '/ws/playwright.config.ts',
@@ -278,5 +308,13 @@ suite('runArguments', () => {
       buildTagArguments('debug', '@auth-api', options),
       ['test', '--debug', '--project', 'webkit', '--grep', '@auth-api'],
     );
+  });
+
+  test('resolves Flake Lab size presets to repetition counts', () => {
+    assert.strictEqual(resolveFlakeLabRepeatEach('quick'), 3);
+    assert.strictEqual(resolveFlakeLabRepeatEach('standard'), 10);
+    assert.strictEqual(resolveFlakeLabRepeatEach('deep'), 25);
+    assert.strictEqual(resolveFlakeLabRepeatEach('custom', 15), 15);
+    assert.strictEqual(resolveFlakeLabRepeatEach(undefined, 8), 8);
   });
 });

@@ -49,8 +49,13 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
 
-  test('contributes the Inspector browser choices with config as the default', () => {
-    const setting = manifest.contributes?.configuration?.[0].properties?.['playwrightCodeLensRunner.inspector.browser'];
+  test('contributes the Inspector and top-level browser choices with config as the default', () => {
+    const properties = manifest.contributes?.configuration?.[0].properties ?? {};
+    const topBrowser = properties['playwrightCodeLensRunner.browser'];
+    assert.strictEqual(topBrowser?.default, 'config');
+    assert.deepStrictEqual(topBrowser?.enum, ['config', 'chromium', 'firefox', 'webkit']);
+
+    const setting = properties['playwrightCodeLensRunner.inspector.browser'];
     assert.strictEqual(setting?.default, 'config');
     assert.deepStrictEqual(setting?.enum, ['config', 'chromium', 'firefox', 'webkit']);
   });
@@ -100,7 +105,12 @@ suite('extension manifest', () => {
     const commands = new Set((manifest.contributes?.commands ?? []).map((entry) => entry.command));
     for (const command of [
       'playwrightCodeLensRunner.flakeLab',
+      'playwrightCodeLensRunner.flakeLabWithSize',
       'playwrightCodeLensRunner.runCompanion',
+      'playwrightCodeLensRunner.cancelCompanionRun',
+      'playwrightCodeLensRunner.clearRuns',
+      'playwrightCodeLensRunner.runSingleCompanionTest',
+      'playwrightCodeLensRunner.flakeSingleCompanionTest',
       'playwrightCodeLensRunner.openChangedUi',
       'playwrightCodeLensRunner.openLastFailedUi',
       'playwrightCodeLensRunner.tagActions',
@@ -118,6 +128,15 @@ suite('extension manifest', () => {
 
   test('contributes companion defaults and the Playwright Activity Bar views', () => {
     const properties = manifest.contributes?.configuration?.[0].properties ?? {};
+    assert.strictEqual(properties['playwrightCodeLensRunner.companion.showCliOutput']?.default, 'on-run');
+    assert.deepStrictEqual(properties['playwrightCodeLensRunner.companion.showCliOutput']?.enum, ['on-run', 'on-failure', 'never']);
+    assert.strictEqual(properties['playwrightCodeLensRunner.companion.browser']?.default, 'config');
+    assert.deepStrictEqual(properties['playwrightCodeLensRunner.companion.browser']?.enum, ['config', 'chromium', 'firefox', 'webkit']);
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.browser']?.default, 'config');
+    assert.deepStrictEqual(properties['playwrightCodeLensRunner.flakeLab.browser']?.enum, ['config', 'chromium', 'firefox', 'webkit']);
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.size']?.default, 'standard');
+    assert.deepStrictEqual(properties['playwrightCodeLensRunner.flakeLab.size']?.enum, ['quick', 'standard', 'deep', 'custom']);
+    assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.maxScopeTests']?.default, 15);
     assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.repeatEach']?.default, 10);
     assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.workers']?.default, 1);
     assert.strictEqual(properties['playwrightCodeLensRunner.flakeLab.retries']?.default, 1);
@@ -126,6 +145,8 @@ suite('extension manifest', () => {
     assert.strictEqual(properties['playwrightCodeLensRunner.sidebar.autoFocus']?.default, true);
     assert.strictEqual(properties['playwrightCodeLensRunner.sidebar.runsEnabled']?.default, true);
     assert.strictEqual(properties['playwrightCodeLensRunner.sidebar.runsEnabled']?.scope, 'window');
+    assert.strictEqual(properties['playwrightCodeLensRunner.sidebar.historySize']?.default, 3);
+    assert.strictEqual(properties['playwrightCodeLensRunner.sidebar.historySize']?.scope, 'window');
     assert.deepStrictEqual(properties['playwrightCodeLensRunner.artifacts.scanDirectories']?.default, [
       'playwright-report', 'blob-report', 'test-results',
     ]);

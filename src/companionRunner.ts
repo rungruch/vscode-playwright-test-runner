@@ -6,8 +6,10 @@ import { extractRunningTestTitle, isTitleMatch, parseCompanionJsonReport, withPa
 import { CompanionCliRunRequest, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
+import { Settings } from './settings';
 
 const LATEST_RUN_STATE_KEY = 'companion.latestRun';
+const RUN_HISTORY_STATE_KEY = 'companion.runHistory';
 const OUTPUT_TAIL_LIMIT = 24_000;
 
 /**
@@ -19,18 +21,38 @@ export class CompanionCliRunner implements vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<CompanionRunSummary | undefined>();
   private readonly active = new Map<string, { cancel(): void }>();
   private latest: CompanionRunSummary | undefined;
+  private history: CompanionRunSummary[] = [];
 
   readonly onDidChange = this.emitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.latest = context.workspaceState.get<CompanionRunSummary>(LATEST_RUN_STATE_KEY);
+    const saved = context.workspaceState.get<CompanionRunSummary[]>(RUN_HISTORY_STATE_KEY);
+    this.history = Array.isArray(saved) ? saved : (this.latest ? [this.latest] : []);
   }
 
   get latestRun(): CompanionRunSummary | undefined {
     return this.latest;
   }
 
+  get runs(): readonly CompanionRunSummary[] {
+    return this.history;
+  }
+
+  get hasActiveRun(): boolean {
+    return this.active.size > 0;
+  }
+
+  async clearRuns(): Promise<void> {
+    this.latest = undefined;
+    this.history = [];
+    await this.context.workspaceState.update(LATEST_RUN_STATE_KEY, undefined);
+    await this.context.workspaceState.update(RUN_HISTORY_STATE_KEY, undefined);
+    this.emitter.fire(undefined);
+  }
+
   async run(target: RunTarget, request: CompanionCliRunRequest, cancellation?: vscode.CancellationToken): Promise<CompanionRunSummary> {
+    const settings = new Settings(target.configFile ? vscode.Uri.file(target.configFile) : undefined);
     const startedAt = request.startedAt ?? Date.now();
     const id = `${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
     const initialTests = request.initialTests ?? [];
@@ -54,7 +76,10 @@ export class CompanionCliRunner implements vscode.Disposable {
       projects: request.projects,
       tests: initialTests.length > 0 ? initialTests.map((t) => ({ ...t })) : undefined,
     };
-    await this.persist(summary);
+    await this.persist(summary, settings.sidebarHistorySize);
+    if (settings.companionShowCliOutput === 'on-run') {
+      this.showOutput();
+    }
     this.output.appendLine(`\n[${new Date(startedAt).toLocaleTimeString()}] ${request.kind} — ${target.configFile ?? target.cwd}`);
     this.output.appendLine(this.commandPreview(target, request.args));
 
@@ -73,6 +98,12 @@ export class CompanionCliRunner implements vscode.Disposable {
           tests: updatedTests,
         };
         this.latest = summary;
+        const existingIdx = this.history.findIndex((r) => r.id === summary.id);
+        if (existingIdx >= 0) {
+          this.history[existingIdx] = summary;
+        } else {
+          this.history = [summary, ...this.history];
+        }
         this.emitter.fire(summary);
       }
     };
@@ -111,7 +142,10 @@ export class CompanionCliRunner implements vscode.Disposable {
         output: trimOutput(collectedOutput),
       };
       this.output.appendLine(`Companion run ${summary.status}: ${summary.passed}/${summary.total} passed, ${summary.failed} failed, ${summary.flaky} flaky.`);
-      await this.persist(summary);
+      if (settings.companionShowCliOutput === 'on-failure' && (summary.status === 'failed' || summary.status === 'incomplete')) {
+        this.showOutput();
+      }
+      await this.persist(summary, settings.sidebarHistorySize);
       return summary;
     } catch (error) {
       summary = {
@@ -121,7 +155,10 @@ export class CompanionCliRunner implements vscode.Disposable {
         output: `${trimOutput(collectedOutput)}${error instanceof Error ? error.message : String(error)}`,
       };
       this.output.appendLine(`Companion run could not start: ${error instanceof Error ? error.message : String(error)}`);
-      await this.persist(summary);
+      if (settings.companionShowCliOutput === 'on-failure') {
+        this.showOutput();
+      }
+      await this.persist(summary, settings.sidebarHistorySize);
       return summary;
     } finally {
       this.active.delete(id);
@@ -151,9 +188,16 @@ export class CompanionCliRunner implements vscode.Disposable {
     this.emitter.dispose();
   }
 
-  private async persist(summary: CompanionRunSummary): Promise<void> {
+  private async persist(summary: CompanionRunSummary, maxHistory: number = 3): Promise<void> {
     this.latest = summary;
+    const existingIndex = this.history.findIndex((r) => r.id === summary.id);
+    if (existingIndex >= 0) {
+      this.history[existingIndex] = summary;
+    } else {
+      this.history = [summary, ...this.history.filter((r) => r.id !== summary.id)].slice(0, Math.max(1, maxHistory));
+    }
     await this.context.workspaceState.update(LATEST_RUN_STATE_KEY, summary);
+    await this.context.workspaceState.update(RUN_HISTORY_STATE_KEY, this.history);
     this.emitter.fire(summary);
   }
 

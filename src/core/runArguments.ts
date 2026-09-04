@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { ForcedInspectorBrowser } from './inspectorBrowser';
+import { ForcedBrowser } from './inspectorBrowser';
 
 /** Builds Playwright CLI arguments for discovery and companion CLI tools. */
 
@@ -13,7 +13,7 @@ export interface RunSelection {
 }
 
 export interface UiArgumentOptions {
-  browser?: ForcedInspectorBrowser;
+  browser?: ForcedBrowser;
   configFile?: string;
   cwd: string;
   projects?: string[];
@@ -24,12 +24,30 @@ export interface UiArgumentOptions {
   uiPort?: number;
 }
 
+export type FlakeLabSizePreset = 'quick' | 'standard' | 'deep' | 'custom';
+
 export interface FlakeLabOptions extends UiArgumentOptions {
   repeatEach: number;
   workers: number;
   retries: number;
   trace: string;
   failOnFlakyTests: boolean;
+}
+
+export function resolveFlakeLabRepeatEach(
+  sizePreset: FlakeLabSizePreset | string | undefined,
+  fallbackRepeatEach: number = 10,
+): number {
+  if (sizePreset === 'quick') {
+    return 3;
+  }
+  if (sizePreset === 'standard') {
+    return 10;
+  }
+  if (sizePreset === 'deep') {
+    return 25;
+  }
+  return fallbackRepeatEach;
 }
 
 export function escapeRegExp(input: string): string {
@@ -127,6 +145,9 @@ export function buildCompanionTestArguments(selection: RunSelection, options: Ui
   for (const file of selection.files) {
     const filter = playwrightFileFilter(file, options.cwd);
     args.push(selection.line ? `${filter}:${selection.line}` : filter);
+  }
+  if (options.browser) {
+    args.push(`--browser=${options.browser}`);
   }
   for (const project of options.projects ?? []) {
     if (project) {
