@@ -134,6 +134,13 @@ suite('Playwright CodeLens Runner extension', () => {
         test: ['debugTest', 'more', 'runTest'],
       });
 
+      await configuration.update('codeLens.layout', 'companion-only', vscode.ConfigurationTarget.Global);
+      assertLayout(await codeLenses(uri), {
+        file: ['flakeLab', 'more', 'openUi', 'runCompanion', 'selectConfig'],
+        suite: ['flakeLab', 'inspectTest', 'more', 'openUi', 'runCompanion'],
+        test: ['flakeLab', 'inspectTest', 'more', 'openUi', 'runCompanion'],
+      });
+
       await configuration.update('codeLens.fileActions', ['more'], vscode.ConfigurationTarget.Global);
       await configuration.update('codeLens.suiteActions', ['inspect'], vscode.ConfigurationTarget.Global);
       await configuration.update('codeLens.testActions', ['ui'], vscode.ConfigurationTarget.Global);

@@ -43,8 +43,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 3.3.0 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '3.3.0');
+  test('declares the 3.4.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '3.4.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
@@ -60,23 +60,27 @@ suite('extension manifest', () => {
     assert.deepStrictEqual(setting?.enum, ['config', 'chromium', 'firefox', 'webkit']);
   });
 
-  test('contributes validated full, compact, and custom CodeLens settings', () => {
+  test('contributes validated full, compact, companion-only, and custom CodeLens settings', () => {
     const properties = manifest.contributes?.configuration?.[0].properties ?? {};
     const layout = properties['playwrightCodeLensRunner.codeLens.layout'];
     assert.strictEqual(layout?.default, 'full');
-    assert.deepStrictEqual(layout?.enum, ['full', 'compact', 'custom']);
+    assert.deepStrictEqual(layout?.enum, ['full', 'compact', 'companion-only', 'custom']);
+
+    const density = properties['playwrightCodeLensRunner.codeLens.density'];
+    assert.strictEqual(density?.default, 'standard');
+    assert.deepStrictEqual(density?.enum, ['standard', 'short', 'icon-only']);
 
     const expected = {
       fileActions: {
-        allowed: ['run', 'debug', 'ui', 'config', 'more'],
+        allowed: ['run', 'debug', 'ui', 'config', 'more', 'companionRun', 'flake'],
         defaults: ['run', 'debug', 'ui', 'config'],
       },
       suiteActions: {
-        allowed: ['run', 'debug', 'inspect', 'ui', 'more'],
+        allowed: ['run', 'debug', 'inspect', 'ui', 'more', 'companionRun', 'flake'],
         defaults: ['run', 'debug', 'inspect', 'ui'],
       },
       testActions: {
-        allowed: ['run', 'debug', 'inspect', 'ui', 'cases', 'more'],
+        allowed: ['run', 'debug', 'inspect', 'ui', 'cases', 'more', 'companionRun', 'flake'],
         defaults: ['run', 'debug', 'inspect', 'ui', 'cases'],
       },
     } as const;

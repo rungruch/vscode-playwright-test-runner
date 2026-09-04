@@ -439,6 +439,7 @@ async function flakeLabCommand(
           selection: runSelection,
           projects,
           initialTests,
+          repeatEach,
         }, token),
       );
     },
@@ -1256,16 +1257,16 @@ async function initialTestsForSelection(
     const matched = selection.kind === 'file'
       ? selections
       : selections.filter((s) => isSelectionMatch(s, selection));
-    return selections.map((s) => {
+    const targetTests = matched.length > 0 ? matched : selections;
+    return targetTests.map((s) => {
       const title = s.titlePath ? s.titlePath.join(' › ') : s.fullTitle ?? 'Playwright test';
       const line = s.position.line + 1;
-      const isQueued = matched.length === 0 || matched.some((m) => isSelectionMatch(s, m));
       return {
         id: `${s.file}:${line}:${title}`,
         title,
         file: s.file,
         line,
-        status: isQueued ? ('pending' as const) : ('skipped' as const),
+        status: 'pending' as const,
       };
     });
   } catch {

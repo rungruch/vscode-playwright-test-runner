@@ -114,11 +114,51 @@ export class PlaywrightSidebar implements vscode.Disposable {
     if (element.type === 'run') {
       const run = element.run;
       const totals: RunElement[] = [];
+      const isRunning = run.status === 'running';
+      let totalsLabel: string;
+      if (isRunning) {
+        const completed = run.completedTests ?? 0;
+        const progressPart = run.total > 0 ? `${completed}/${run.total} completed` : 'running';
+        const statsParts: string[] = [progressPart];
+        if (run.passed > 0) {
+          statsParts.push(`${run.passed} passed`);
+        }
+        if (run.failed > 0) {
+          statsParts.push(`${run.failed} failed`);
+        }
+        if (run.flaky > 0) {
+          statsParts.push(`${run.flaky} flaky`);
+        }
+        totalsLabel = statsParts.join(' · ');
+      } else {
+        const parts = [
+          `${run.total} total`,
+          `${run.passed} passed`,
+          `${run.failed} failed`,
+          `${run.skipped} skipped`,
+        ];
+        if (run.flaky > 0) {
+          parts.push(`${run.flaky} flaky`);
+        }
+        totalsLabel = parts.join(' · ');
+      }
+
+      let totalsIcon = 'pass';
+      if (isRunning) {
+        totalsIcon = 'sync~spin';
+      } else if (run.status === 'cancelled') {
+        totalsIcon = 'circle-slash';
+      } else if (run.failed > 0 || run.status === 'failed') {
+        totalsIcon = 'error';
+      } else if (run.flaky > 0) {
+        totalsIcon = 'warning';
+      }
+
       totals.push({
         type: 'action',
-        label: `Total ${run.total} · Passed ${run.passed} · Failed ${run.failed} · Skipped ${run.skipped} · Flaky ${run.flaky}`,
+        label: totalsLabel,
         command: 'playwrightCodeLensRunner.openRunsView',
-        icon: run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error',
+        icon: totalsIcon,
       });
       totals.push({
         type: 'action',
@@ -151,53 +191,114 @@ export class PlaywrightSidebar implements vscode.Disposable {
     }
     if (element.type === 'run') {
       const run = element.run;
+      const repeatEach = run.repeatEach;
+      const repeatLabel = run.kind === 'flake-lab' && repeatEach && repeatEach > 1 ? ` (${repeatEach}x)` : '';
       const kindLabel = run.kind === 'flake-lab' ? 'Flake Lab' : run.kind === 'companion-run' ? 'Companion run' : 'failed-test rerun';
       const targetFile = run.selection?.files?.[0];
       const fileBasename = targetFile ? ` (${path.basename(targetFile)})` : '';
       const isExpanded = Boolean(element.isLatest !== false && ((run.tests && run.tests.length > 0) || run.failures.length > 0 || run.status === 'running'));
       const prefix = element.isLatest === false ? 'Run' : 'Latest';
       const item = new vscode.TreeItem(
-        `${prefix} ${kindLabel}${fileBasename}`,
+        `${prefix} ${kindLabel}${repeatLabel}${fileBasename}`,
         isExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
       );
-      item.description = run.status === 'running'
-        ? (run.currentTest ? `running · ${run.currentTest}` : 'running…')
-        : `${run.status} · ${formatDuration(run.durationMs)}`;
+
+      if (run.status === 'running') {
+        const completed = run.completedTests ?? 0;
+        const currentIdx = completed + 1;
+        const totalStr = run.total > 0 ? ` [${Math.min(currentIdx, run.total)}/${run.total}]` : '';
+        const runSuffix = run.kind === 'flake-lab' && repeatEach && repeatEach > 1
+          ? ` (run ${Math.min(currentIdx, run.total)}/${run.total})`
+          : '';
+        const testName = run.currentTest ? ` · ${run.currentTest}` : '';
+        item.description = `running${totalStr}${runSuffix}${testName}`;
+      } else if (run.status === 'passed') {
+        item.description = run.flaky > 0
+          ? `flaky (${run.flaky} flaky) · ${formatDuration(run.durationMs)}`
+          : `passed · ${formatDuration(run.durationMs)}`;
+      } else if (run.status === 'failed') {
+        item.description = run.flaky > 0
+          ? `failed (${run.flaky} flaky) · ${formatDuration(run.durationMs)}`
+          : `failed · ${formatDuration(run.durationMs)}`;
+      } else if (run.status === 'cancelled') {
+        item.description = `cancelled · ${formatDuration(run.durationMs)}`;
+      } else {
+        item.description = `${run.status} · ${formatDuration(run.durationMs)}`;
+      }
+
       const startedStr = new Date(run.startedAt).toLocaleTimeString();
+      const statusBadge = run.status === 'running'
+        ? '⏳ Running'
+        : run.status === 'passed' && run.flaky > 0
+          ? '⚠️ Passed with Flakes'
+          : run.status === 'passed'
+            ? '✅ Passed'
+            : run.status === 'cancelled'
+              ? '🚫 Cancelled'
+              : '❌ Failed';
+
       item.tooltip = new vscode.MarkdownString(
-        `**Playwright ${kindLabel}**\n\n` +
-        `- **Status**: ${run.status}\n` +
+        `### Playwright ${kindLabel}${repeatLabel}\n\n` +
+        `- **Status**: ${statusBadge}\n` +
         `- **Started**: ${startedStr}\n` +
         `- **Duration**: ${formatDuration(run.durationMs)}\n` +
         `- **Passed**: ${run.passed} / ${run.total}\n` +
         `- **Failed**: ${run.failed}\n` +
         `- **Flaky**: ${run.flaky}\n` +
         `- **Skipped**: ${run.skipped}\n` +
+        (run.currentTest && run.status === 'running' ? `- **Active Test**: \`${run.currentTest}\`\n` : '') +
         (run.configFile ? `- **Config**: \`${path.basename(run.configFile)}\`\n` : '') +
         (run.projects && run.projects.length > 0 ? `- **Projects**: ${run.projects.join(', ')}\n` : ''),
       );
-      item.iconPath = new vscode.ThemeIcon(run.status === 'passed' ? 'pass' : run.status === 'running' ? 'sync~spin' : 'error');
+
+      if (run.status === 'running') {
+        item.iconPath = new vscode.ThemeIcon('sync~spin', new vscode.ThemeColor('testing.iconQueued'));
+      } else if (run.status === 'passed') {
+        item.iconPath = run.flaky > 0
+          ? new vscode.ThemeIcon('warning', new vscode.ThemeColor('testing.iconQueued'))
+          : new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+      } else if (run.status === 'cancelled') {
+        item.iconPath = new vscode.ThemeIcon('circle-slash', new vscode.ThemeColor('testing.iconSkipped'));
+      } else {
+        item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+      }
+
       item.contextValue = run.status === 'running' ? 'playwrightCompanionRun.running' : 'playwrightCompanionRun';
       return item;
     }
     if (element.type === 'testCase') {
       const test = element.test;
       const item = new vscode.TreeItem(test.title, vscode.TreeItemCollapsibleState.None);
-      item.description = test.status === 'running'
-        ? 'running'
-        : test.durationMs !== undefined && test.durationMs > 0
-          ? formatDuration(test.durationMs)
-          : test.status;
-      const icon = test.status === 'running'
-        ? 'sync~spin'
-        : test.status === 'passed'
-          ? 'pass'
-          : test.status === 'failed'
-            ? 'error'
-            : test.status === 'skipped'
-              ? 'dash'
-              : 'circle-outline';
-      item.iconPath = new vscode.ThemeIcon(icon);
+      if (test.status === 'running') {
+        item.description = test.totalRuns && test.totalRuns > 1
+          ? `running (${(test.passedRuns ?? 0) + (test.failedRuns ?? 0) + 1}/${test.totalRuns})`
+          : 'running';
+      } else if (test.status === 'flaky') {
+        item.description = test.totalRuns && test.totalRuns > 1
+          ? `flaky · ${test.passedRuns ?? 0}/${test.totalRuns} passed`
+          : 'flaky';
+      } else if (test.totalRuns && test.totalRuns > 1) {
+        item.description = `${test.passedRuns}/${test.totalRuns} passed · ${formatDuration(test.durationMs ?? 0)}`;
+      } else if (test.durationMs !== undefined && test.durationMs > 0) {
+        item.description = formatDuration(test.durationMs);
+      } else {
+        item.description = test.status;
+      }
+
+      if (test.status === 'running') {
+        item.iconPath = new vscode.ThemeIcon('sync~spin', new vscode.ThemeColor('testing.iconQueued'));
+      } else if (test.status === 'passed') {
+        item.iconPath = new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+      } else if (test.status === 'flaky') {
+        item.iconPath = new vscode.ThemeIcon('warning', new vscode.ThemeColor('testing.iconQueued'));
+      } else if (test.status === 'failed') {
+        item.iconPath = new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+      } else if (test.status === 'skipped') {
+        item.iconPath = new vscode.ThemeIcon('dash', new vscode.ThemeColor('testing.iconSkipped'));
+      } else {
+        item.iconPath = new vscode.ThemeIcon('circle-outline', new vscode.ThemeColor('testing.iconUnset'));
+      }
+
       if (test.file) {
         item.command = {
           command: 'vscode.open',
@@ -208,10 +309,16 @@ export class PlaywrightSidebar implements vscode.Disposable {
           ],
         };
       }
+
+      const runsInfo = test.totalRuns && test.totalRuns > 1
+        ? `- **Iterations**: ${test.passedRuns ?? 0} passed, ${test.failedRuns ?? 0} failed (of ${test.totalRuns})\n`
+        : '';
       item.tooltip = new vscode.MarkdownString(
         `**${test.title}**\n\n` +
         `- **Status**: ${test.status}\n` +
+        runsInfo +
         (test.durationMs ? `- **Duration**: ${formatDuration(test.durationMs)}\n` : '') +
+        (test.project ? `- **Project**: ${test.project}\n` : '') +
         (test.file ? `- **Location**: \`${path.basename(test.file)}:${test.line ?? 1}\`\n` : '') +
         (test.message ? `\n\`\`\`\n${test.message}\n\`\`\`` : ''),
       );

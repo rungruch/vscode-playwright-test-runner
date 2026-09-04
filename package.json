@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -239,7 +239,13 @@
           },
           "playwrightCodeLensRunner.flakeLab.trace": {
             "type": "string",
-            "enum": ["on", "off", "retain-on-failure", "on-first-retry", "on-all-retries"],
+            "enum": [
+              "on",
+              "off",
+              "retain-on-failure",
+              "on-first-retry",
+              "on-all-retries"
+            ],
             "default": "on",
             "markdownDescription": "Trace mode forced for Flake Lab.",
             "scope": "resource"
@@ -255,11 +261,23 @@
             "default": [],
             "items": {
               "type": "object",
-              "required": ["name", "host", "port"],
+              "required": [
+                "name",
+                "host",
+                "port"
+              ],
               "properties": {
-                "name": { "type": "string" },
-                "host": { "type": "string" },
-                "port": { "type": "number", "minimum": 1, "maximum": 65535 }
+                "name": {
+                  "type": "string"
+                },
+                "host": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "number",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
               }
             },
             "markdownDescription": "Named Playwright UI host/port profiles. Non-loopback hosts prompt before launch.",
@@ -293,8 +311,14 @@
           },
           "playwrightCodeLensRunner.artifacts.scanDirectories": {
             "type": "array",
-            "items": { "type": "string" },
-            "default": ["playwright-report", "blob-report", "test-results"],
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "playwright-report",
+              "blob-report",
+              "test-results"
+            ],
             "markdownDescription": "Workspace-local artifact directories to scan relative to each Playwright config.",
             "scope": "resource"
           },
@@ -315,15 +339,51 @@
             "enum": [
               "full",
               "compact",
+              "companion-only",
               "custom"
             ],
             "enumDescriptions": [
               "Show the complete file, suite, and test action sets.",
               "Show Run, Debug, and More… for every declaration.",
+              "Hide redundant gutter Run/Debug actions and promote Companion Run, Inspect, UI, and Flake Lab.",
               "Use the fileActions, suiteActions, and testActions settings below."
             ],
             "default": "full",
             "markdownDescription": "CodeLens layout. `custom` lets you choose separate actions for files, suites, and tests.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.codeLens.density": {
+            "type": "string",
+            "enum": [
+              "standard",
+              "short",
+              "icon-only"
+            ],
+            "enumDescriptions": [
+              "Show full descriptive labels: Run Test, Debug Test, Inspect Test, Playwright UI.",
+              "Show short verbs: Run, Debug, Inspect, UI, Flake Lab.",
+              "Show compact icons only: $(play), $(debug), $(eye), $(browser), $(beaker)."
+            ],
+            "default": "standard",
+            "markdownDescription": "Controls the verbosity and visual density of CodeLens action labels.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.codeLens.showLastRunStatus": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Display last companion run outcome ($(pass) Passed, $(error) Failed) inline in CodeLens.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.codeLens.showRunningStatus": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Display a live running indicator ($(sync~spin) Running…) while a companion test is executing.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.codeLens.fastStaticDiscovery": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Use instant static AST parsing (<3ms) to eliminate editor layout jumping on file open, followed by background CLI reconciliation.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.fileActions": {
@@ -336,7 +396,9 @@
                 "debug",
                 "ui",
                 "config",
-                "more"
+                "more",
+                "companionRun",
+                "flake"
               ]
             },
             "default": [
@@ -358,7 +420,9 @@
                 "debug",
                 "inspect",
                 "ui",
-                "more"
+                "more",
+                "companionRun",
+                "flake"
               ]
             },
             "default": [
@@ -381,7 +445,9 @@
                 "inspect",
                 "ui",
                 "cases",
-                "more"
+                "more",
+                "companionRun",
+                "flake"
               ]
             },
             "default": [
@@ -884,5 +950,8 @@
     "mocha": "^11.8.0",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.66.0"
+  },
+  "dependencies": {
+    "@babel/parser": "^8.0.4"
   }
 }

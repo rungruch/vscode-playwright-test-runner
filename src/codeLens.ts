@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
+import { parseTestFileAst } from './core/astParser';
+import { CompanionCliRunner } from './companionRunner';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import { DiscoveryService } from './discoveryService';
 import { RunTarget, targetLabel as runTargetLabel } from './runTarget';
-import { CodeLensAction, SETTINGS_NAMESPACE, Settings } from './settings';
+import { CodeLensAction, CodeLensDensity, SETTINGS_NAMESPACE, Settings } from './settings';
 
 const TEST_DOCUMENTS: vscode.DocumentSelector = [
   { scheme: 'file', language: 'javascript' },
@@ -12,16 +14,19 @@ const TEST_DOCUMENTS: vscode.DocumentSelector = [
 ];
 
 /**
- * Editor-first Playwright actions backed by CLI discovery. Run and Debug are
- * delegated to Microsoft's Playwright extension; Inspector and UI stay CLI
- * tools owned by this companion.
+ * Editor-first Playwright actions backed by fast AST and CLI discovery.
+ * Run and Debug can be delegated to Microsoft's Playwright extension,
+ * or promoted to companion CLI runs with live execution status.
  */
 class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
   readonly onDidChangeCodeLenses = this.emitter.event;
 
-  constructor(private readonly discovery: DiscoveryService) {
+  constructor(
+    private readonly discovery: DiscoveryService,
+    private readonly runner?: CompanionCliRunner,
+  ) {
     this.disposables.push(
       this.discovery.onDidDiscover(() => this.emitter.fire()),
       vscode.workspace.onDidChangeConfiguration((event) => {
@@ -30,6 +35,9 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
         }
       }),
     );
+    if (this.runner) {
+      this.disposables.push(this.runner.onDidChange(() => this.emitter.fire()));
+    }
   }
 
   async provideCodeLenses(document: vscode.TextDocument, token: vscode.CancellationToken): Promise<vscode.CodeLens[]> {
@@ -45,7 +53,24 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
     if (!target || token.isCancellationRequested) {
       return [];
     }
-    const model = await this.discovery.discoverForFile(target, document.uri.fsPath, token);
+
+    let model = this.discovery.cachedModelForFile(target.id, document.uri.fsPath)
+      ?? this.discovery.cachedModel(target.id);
+
+    if (!model && settings.codeLensFastStaticDiscovery) {
+      // Tier-1: Instant static AST discovery (<3ms). Renders immediately without layout shift!
+      model = parseTestFileAst(document.getText(), document.uri.fsPath, {
+        targetId: target.id,
+        rootDir: target.configDir,
+      });
+      // Trigger background CLI discovery to enrich projects / dynamic cases
+      void this.discovery.discoverForFile(target, document.uri.fsPath).then(() => {
+        this.emitter.fire();
+      }).catch(() => undefined);
+    } else if (!model) {
+      model = await this.discovery.discoverForFile(target, document.uri.fsPath, token);
+    }
+
     if (!model || token.isCancellationRequested) {
       const error = this.discovery.errorFor(target.id, document.uri.fsPath);
       if (error) {
@@ -76,6 +101,7 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
       }
       return [];
     }
+
     // Full discovery supplies project metadata in the background while the
     // file-scoped result keeps this editor responsive in large workspaces.
     void this.discovery.discover(target).catch(() => undefined);
@@ -84,12 +110,10 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
     const lenses: vscode.CodeLens[] = [];
     for (const selection of selections) {
       const range = rangeFor(selection);
-      if (selection.kind === 'file') {
-        addActions(lenses, range, selection, settings.codeLensActions('file'), target);
-        continue;
+      if (selection.kind === 'test') {
+        addTestStatusLens(lenses, range, selection, this.runner, settings);
       }
-
-      addActions(lenses, range, selection, settings.codeLensActions(selection.kind), target);
+      addActions(lenses, range, selection, settings.codeLensActions(selection.kind), target, settings.codeLensDensity);
     }
     return lenses;
   }
@@ -106,47 +130,140 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
   }
 }
 
+function addTestStatusLens(
+  lenses: vscode.CodeLens[],
+  range: vscode.Range,
+  selection: EditorTestSelection,
+  runner: CompanionCliRunner | undefined,
+  settings: Settings,
+): void {
+  if (!runner) {
+    return;
+  }
+  const statusInfo = runner.testStatusFor(selection.file, selection.position.line, selection.titlePath);
+  if (!statusInfo) {
+    return;
+  }
+
+  if (statusInfo.status === 'running' && settings.codeLensShowRunningStatus) {
+    lenses.push(new vscode.CodeLens(range, {
+      title: '$(sync~spin) Running…',
+      command: 'playwrightCodeLensRunner.showCompanionOutput',
+    }));
+  } else if (statusInfo.status === 'passed' && settings.codeLensShowLastRunStatus) {
+    const duration = statusInfo.durationMs !== undefined ? ` (${formatDuration(statusInfo.durationMs)})` : '';
+    lenses.push(new vscode.CodeLens(range, {
+      title: `$(pass) Passed${duration}`,
+      command: 'playwrightCodeLensRunner.showCompanionOutput',
+    }));
+  } else if (statusInfo.status === 'failed' && settings.codeLensShowLastRunStatus) {
+    if (statusInfo.failure) {
+      lenses.push(new vscode.CodeLens(range, {
+        title: '$(error) Failed (view failure)',
+        command: 'playwrightCodeLensRunner.openFailure',
+        arguments: [statusInfo.failure],
+      }));
+    } else {
+      lenses.push(new vscode.CodeLens(range, {
+        title: '$(error) Failed',
+        command: 'playwrightCodeLensRunner.showCompanionOutput',
+      }));
+    }
+  } else if (statusInfo.status === 'flaky' && settings.codeLensShowLastRunStatus) {
+    lenses.push(new vscode.CodeLens(range, {
+      title: '$(warning) Flaky',
+      command: 'playwrightCodeLensRunner.showCompanionOutput',
+    }));
+  }
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) {
+    return `${ms}ms`;
+  }
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
 function addActions(
   lenses: vscode.CodeLens[],
   range: vscode.Range,
   selection: EditorTestSelection,
   actions: CodeLensAction[],
   target: RunTarget,
+  density: CodeLensDensity = 'standard',
 ): void {
   for (const action of actions) {
     if (action === 'run') {
+      const label = density === 'icon-only'
+        ? '$(play)'
+        : density === 'short'
+          ? '$(play) Run'
+          : selection.kind === 'file' ? '$(play) Run File' : `$(play) Run ${selection.kind === 'suite' ? 'Suite' : 'Test'}`;
       addLens(
         lenses,
         range,
-        selection.kind === 'file' ? '$(play) Run File' : `$(play) Run ${selection.kind === 'suite' ? 'Suite' : 'Test'}`,
+        label,
         selection.kind === 'file' ? 'playwrightCodeLensRunner.runFile' : 'playwrightCodeLensRunner.runTest',
         selection,
       );
     } else if (action === 'debug') {
+      const label = density === 'icon-only'
+        ? '$(debug)'
+        : density === 'short'
+          ? '$(debug) Debug'
+          : selection.kind === 'file' ? '$(debug) Debug File' : `$(debug) Debug ${selection.kind === 'suite' ? 'Suite' : 'Test'}`;
       addLens(
         lenses,
         range,
-        selection.kind === 'file' ? '$(debug) Debug File' : `$(debug) Debug ${selection.kind === 'suite' ? 'Suite' : 'Test'}`,
+        label,
         selection.kind === 'file' ? 'playwrightCodeLensRunner.debugFile' : 'playwrightCodeLensRunner.debugTest',
         selection,
       );
+    } else if (action === 'companionRun') {
+      const label = density === 'icon-only'
+        ? '$(play)'
+        : density === 'short'
+          ? '$(play) Run'
+          : selection.kind === 'file'
+            ? '$(play) Run Companion File'
+            : `$(play) Run Companion ${selection.kind === 'suite' ? 'Suite' : 'Test'}`;
+      addLens(lenses, range, label, 'playwrightCodeLensRunner.runCompanion', selection);
+    } else if (action === 'flake') {
+      const label = density === 'icon-only'
+        ? '$(beaker)'
+        : '$(beaker) Flake Lab';
+      addLens(lenses, range, label, 'playwrightCodeLensRunner.flakeLab', selection);
     } else if (action === 'inspect' && selection.kind !== 'file') {
+      const label = density === 'icon-only'
+        ? '$(eye)'
+        : density === 'short'
+          ? '$(eye) Inspect'
+          : `$(eye) Inspect ${selection.kind === 'suite' ? 'Suite' : 'Test'}`;
       addLens(
         lenses,
         range,
-        `$(eye) Inspect ${selection.kind === 'suite' ? 'Suite' : 'Test'}`,
+        label,
         'playwrightCodeLensRunner.inspectTest',
         selection,
       );
     } else if (action === 'ui') {
-      addLens(lenses, range, '$(browser) Playwright UI', 'playwrightCodeLensRunner.openUi', selection);
+      const label = density === 'icon-only'
+        ? '$(browser)'
+        : density === 'short'
+          ? '$(browser) UI'
+          : '$(browser) Playwright UI';
+      addLens(lenses, range, label, 'playwrightCodeLensRunner.openUi', selection);
     } else if (action === 'more') {
-      addLens(lenses, range, '$(ellipsis) More…', 'playwrightCodeLensRunner.more', selection);
+      const label = density === 'icon-only' ? '$(ellipsis)' : '$(ellipsis) More…';
+      addLens(lenses, range, label, 'playwrightCodeLensRunner.more', selection);
     } else if (action === 'config' && selection.kind === 'file') {
+      const label = density === 'icon-only'
+        ? '$(settings-gear)'
+        : `$(settings-gear) CLI Config: ${runTargetLabel(target)}`;
       addLens(
         lenses,
         range,
-        `$(settings-gear) CLI Config: ${runTargetLabel(target)}`,
+        label,
         'playwrightCodeLensRunner.selectConfig',
         selection,
       );
@@ -165,8 +282,9 @@ function addActions(
 export function registerCodeLensSupport(
   context: vscode.ExtensionContext,
   discovery: DiscoveryService,
+  runner?: CompanionCliRunner,
 ): void {
-  const provider = new PlaywrightCodeLensProvider(discovery);
+  const provider = new PlaywrightCodeLensProvider(discovery, runner);
   context.subscriptions.push(
     provider,
     vscode.languages.registerCodeLensProvider(TEST_DOCUMENTS, provider),

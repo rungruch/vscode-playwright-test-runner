@@ -2,11 +2,20 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { extractRunningTestTitle, isTitleMatch, parseCompanionJsonReport, withParsedReport } from './core/companionReport';
+import {
+  extractRunningProgress,
+  isTitleMatch,
+  lookupTestRunStatus,
+  parseCompanionJsonReport,
+  TestRunStatus,
+  withParsedReport,
+} from './core/companionReport';
 import { CompanionCliRunRequest, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 import { Settings } from './settings';
+
+export { TestRunStatus };
 
 const LATEST_RUN_STATE_KEY = 'companion.latestRun';
 const RUN_HISTORY_STATE_KEY = 'companion.runHistory';
@@ -43,6 +52,14 @@ export class CompanionCliRunner implements vscode.Disposable {
     return this.active.size > 0;
   }
 
+  testStatusFor(
+    file: string,
+    line: number,
+    titlePath?: string[],
+  ): TestRunStatus | undefined {
+    return lookupTestRunStatus(this.latest, this.hasActiveRun, file, line, titlePath);
+  }
+
   async clearRuns(): Promise<void> {
     this.latest = undefined;
     this.history = [];
@@ -56,6 +73,10 @@ export class CompanionCliRunner implements vscode.Disposable {
     const startedAt = request.startedAt ?? Date.now();
     const id = `${startedAt}-${Math.random().toString(36).slice(2, 8)}`;
     const initialTests = request.initialTests ?? [];
+    const repeatEach = request.repeatEach ?? 1;
+    const initialTotal = request.kind === 'flake-lab' && repeatEach > 1
+      ? Math.max(initialTests.length * repeatEach, initialTests.length)
+      : initialTests.length;
     let summary: CompanionRunSummary = {
       id,
       kind: request.kind,
@@ -65,7 +86,7 @@ export class CompanionCliRunner implements vscode.Disposable {
       status: 'running',
       startedAt,
       durationMs: 0,
-      total: initialTests.length,
+      total: initialTotal,
       passed: 0,
       failed: 0,
       skipped: 0,
@@ -75,6 +96,8 @@ export class CompanionCliRunner implements vscode.Disposable {
       selection: request.selection,
       projects: request.projects,
       tests: initialTests.length > 0 ? initialTests.map((t) => ({ ...t })) : undefined,
+      completedTests: 0,
+      repeatEach: request.repeatEach,
     };
     await this.persist(summary, settings.sidebarHistorySize);
     if (settings.companionShowCliOutput === 'on-run') {
@@ -85,15 +108,43 @@ export class CompanionCliRunner implements vscode.Disposable {
 
     let tempDirectory: string | undefined;
     let collectedOutput = '';
+    let lastIndex: number | undefined;
     const append = (text: string) => {
       collectedOutput = trimOutput(`${collectedOutput}${text}`);
       this.output.append(text);
-      const currentTest = extractRunningTestTitle(text);
-      if (currentTest && currentTest !== summary.currentTest) {
-        const updatedTests = updateRunningTests(summary.tests ?? [], currentTest);
+      const progress = extractRunningProgress(text);
+      if (!progress) {
+        return;
+      }
+
+      let updated = false;
+      let newTotal = summary.total;
+      if (progress.totalAnnounced && progress.totalAnnounced > newTotal) {
+        newTotal = progress.totalAnnounced;
+        updated = true;
+      } else if (progress.total && progress.total > newTotal) {
+        newTotal = progress.total;
+        updated = true;
+      }
+
+      const indexChanged = progress.index !== undefined && progress.index !== lastIndex;
+      if (progress.index !== undefined) {
+        lastIndex = progress.index;
+      }
+
+      const currentTest = progress.title;
+      const titleChanged = Boolean(currentTest && currentTest !== summary.currentTest);
+
+      if (indexChanged || titleChanged || updated) {
+        const completedCount = progress.index !== undefined ? Math.max(0, progress.index - 1) : summary.completedTests;
+        const updatedTests = currentTest
+          ? updateRunningTests(summary.tests ?? [], currentTest, progress.failedTitle)
+          : summary.tests;
         summary = {
           ...summary,
-          currentTest,
+          total: newTotal,
+          currentTest: currentTest ?? summary.currentTest,
+          completedTests: completedCount,
           durationMs: Date.now() - startedAt,
           tests: updatedTests,
         };
@@ -218,11 +269,11 @@ function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
 }
 
-function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): CompanionTestItem[] {
+function updateRunningTests(tests: CompanionTestItem[], runningTitle: string, failedTitle?: string): CompanionTestItem[] {
   const result: CompanionTestItem[] = tests.map((t) => ({ ...t }));
   for (const t of result) {
     if (t.status === 'running') {
-      t.status = 'passed';
+      t.status = failedTitle && isTitleMatch(t.title, failedTitle) ? 'failed' : 'passed';
     }
   }
   let matched = false;
@@ -243,3 +294,4 @@ function updateRunningTests(tests: CompanionTestItem[], runningTitle: string): C
   }
   return result;
 }
+

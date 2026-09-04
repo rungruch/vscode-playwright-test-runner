@@ -1,6 +1,6 @@
 import { RunSelection } from './runArguments';
 
-export type CompanionTestStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped';
+export type CompanionTestStatus = 'pending' | 'running' | 'passed' | 'failed' | 'flaky' | 'skipped';
 
 export interface CompanionTestItem {
   id: string;
@@ -10,6 +10,10 @@ export interface CompanionTestItem {
   status: CompanionTestStatus;
   durationMs?: number;
   message?: string;
+  project?: string;
+  totalRuns?: number;
+  passedRuns?: number;
+  failedRuns?: number;
 }
 
 /** A structured, extension-owned CLI invocation. */
@@ -25,6 +29,7 @@ export interface CompanionCliRunRequest {
   projects: string[];
   startedAt?: number;
   initialTests?: CompanionTestItem[];
+  repeatEach?: number;
 }
 
 type CompanionRunStatus = 'running' | 'passed' | 'failed' | 'cancelled' | 'incomplete';
@@ -59,6 +64,8 @@ export interface CompanionRunSummary {
   currentTest?: string;
   tests?: CompanionTestItem[];
   output?: string;
+  completedTests?: number;
+  repeatEach?: number;
 }
 
 export interface UiProfile {

@@ -1,5 +1,19 @@
 # Change Log
 
+## 3.4.0 - 2026-09-04
+
+- **Flake Lab & Companion Run Sidebar UI/UX**:
+  - Live progress display during runs: renders real-time progress counters (e.g. `running [3/10] · 1.5s` and iteration indicators `(run 3/10)` for Flake Lab).
+  - Repetition indicator badges on Flake Lab run headers (e.g. `Latest Flake Lab (10x)`).
+  - Clean distinction between clean passes, flaky runs (`flaky · 8/10 passed (2 failed)`), failures, and cancellations.
+  - Semantic `vscode.ThemeColor` icons (`testing.iconPassed`, `testing.iconFailed`, `testing.iconQueued` for flaky, `testing.iconSkipped` for cancelled).
+  - Rich Markdown tooltips with status badges, repetition breakdowns, duration, config, projects, and failure previews.
+- **Accurate Status Tracking & Flake Detection**:
+  - Overhauled JSON report aggregation to group multiple repetitions of the same test definition (`repeatEach`), detecting flakes across runs and preserving pass/fail counts and error messages.
+  - Parse top-level Playwright `stats` and direct `flaky` test statuses.
+  - Synchronize flaky status to CodeLens (`$(warning) Flaky`).
+  - Refined title matching and scope discovery to eliminate phantom `skipped` tests and cross-suite naming collisions.
+
 ## 3.3.0 - 2026-09-04
 
 - Add **Run Companion Test (Normal CLI Run)** action to the **More…** quick pick menu and Command Palette (`playwrightCodeLensRunner.runCompanion`), supporting standard single Playwright companion executions alongside Flake Lab stress testing.

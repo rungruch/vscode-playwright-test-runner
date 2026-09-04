@@ -34,7 +34,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
 
   context.subscriptions.push(discovery, runner, artifacts, sessions, reportSession);
   registerCommands({ context, discovery, bridge, projects, runner, artifacts, sessions, reportSession, sidebar });
-  registerCodeLensSupport(context, discovery);
+  registerCodeLensSupport(context, discovery, runner);
 
   await bridge.activate();
   void discovery.refreshTargets().catch((error: unknown) => {

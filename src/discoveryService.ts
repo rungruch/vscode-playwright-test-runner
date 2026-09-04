@@ -136,6 +136,10 @@ export class DiscoveryService implements vscode.Disposable {
     return this.cache.get(targetId);
   }
 
+  cachedModelForFile(targetId: string, scopeFile: string): DiscoveredConfig | undefined {
+    return this.fileCache.get(discoveryKey(targetId, scopeFile));
+  }
+
   diagnosticsFor(targetId: string, scopeFile?: string): DiscoveryDiagnostics | undefined {
     if (scopeFile) {
       return this.diagnostics.get(discoveryKey(targetId, scopeFile));

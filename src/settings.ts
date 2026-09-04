@@ -9,21 +9,25 @@ export const SETTINGS_NAMESPACE = 'playwrightCodeLensRunner';
 
 const DEFAULT_CODE_LENS_PATTERN = '**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}';
 
-export type CodeLensLayout = 'full' | 'compact' | 'custom';
-export type CodeLensAction = 'run' | 'debug' | 'inspect' | 'ui' | 'config' | 'cases' | 'more';
+export type CodeLensLayout = 'full' | 'compact' | 'companion-only' | 'custom';
+export type CodeLensDensity = 'standard' | 'short' | 'icon-only';
+export type CodeLensAction = 'run' | 'debug' | 'inspect' | 'ui' | 'config' | 'cases' | 'more' | 'companionRun' | 'flake';
 export type CompanionShowCliOutput = 'on-run' | 'on-failure' | 'never';
 export type InspectorBrowser = BrowserPreference;
 export { FlakeLabSizePreset };
 
 const ACTIONS_BY_KIND: Record<'file' | 'suite' | 'test', readonly CodeLensAction[]> = {
-  file: ['run', 'debug', 'ui', 'config', 'more'],
-  suite: ['run', 'debug', 'inspect', 'ui', 'more'],
-  test: ['run', 'debug', 'inspect', 'ui', 'cases', 'more'],
+  file: ['run', 'debug', 'ui', 'config', 'more', 'companionRun', 'flake'],
+  suite: ['run', 'debug', 'inspect', 'ui', 'more', 'companionRun', 'flake'],
+  test: ['run', 'debug', 'inspect', 'ui', 'cases', 'more', 'companionRun', 'flake'],
 };
 const FULL_FILE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'ui', 'config', 'more'];
 const FULL_SUITE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'more'];
 const FULL_TEST_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'cases', 'more'];
 const COMPACT_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'more'];
+const COMPANION_ONLY_FILE_ACTIONS: readonly CodeLensAction[] = ['companionRun', 'ui', 'flake', 'config', 'more'];
+const COMPANION_ONLY_SUITE_ACTIONS: readonly CodeLensAction[] = ['companionRun', 'inspect', 'ui', 'flake', 'more'];
+const COMPANION_ONLY_TEST_ACTIONS: readonly CodeLensAction[] = ['companionRun', 'inspect', 'ui', 'flake', 'cases', 'more'];
 
 /**
  * Reads `playwrightCodeLensRunner.*` settings. Empty strings, arrays and
@@ -221,12 +225,36 @@ export class Settings {
 
   get codeLensLayout(): CodeLensLayout {
     const layout = this.configuration().get<string>('codeLens.layout', 'full');
-    return layout === 'compact' || layout === 'custom' ? layout : 'full';
+    return layout === 'compact' || layout === 'companion-only' || layout === 'custom' ? layout : 'full';
+  }
+
+  get codeLensDensity(): CodeLensDensity {
+    const density = this.configuration().get<string>('codeLens.density', 'standard');
+    return density === 'short' || density === 'icon-only' ? density : 'standard';
+  }
+
+  get codeLensShowLastRunStatus(): boolean {
+    return this.configuration().get<boolean>('codeLens.showLastRunStatus', true);
+  }
+
+  get codeLensShowRunningStatus(): boolean {
+    return this.configuration().get<boolean>('codeLens.showRunningStatus', true);
+  }
+
+  get codeLensFastStaticDiscovery(): boolean {
+    return this.configuration().get<boolean>('codeLens.fastStaticDiscovery', true);
   }
 
   codeLensActions(kind: 'file' | 'suite' | 'test'): CodeLensAction[] {
     if (this.codeLensLayout === 'compact') {
       return [...COMPACT_ACTIONS];
+    }
+    if (this.codeLensLayout === 'companion-only') {
+      return kind === 'file'
+        ? [...COMPANION_ONLY_FILE_ACTIONS]
+        : kind === 'suite'
+          ? [...COMPANION_ONLY_SUITE_ACTIONS]
+          : [...COMPANION_ONLY_TEST_ACTIONS];
     }
     if (this.codeLensLayout === 'full') {
       return kind === 'file' ? [...FULL_FILE_ACTIONS] : kind === 'suite' ? [...FULL_SUITE_ACTIONS] : [...FULL_TEST_ACTIONS];
@@ -247,7 +275,9 @@ function isCodeLensAction(value: string): value is CodeLensAction {
     || value === 'ui'
     || value === 'config'
     || value === 'cases'
-    || value === 'more';
+    || value === 'more'
+    || value === 'companionRun'
+    || value === 'flake';
 }
 
 function positiveInteger(value: number, fallback: number): number {
