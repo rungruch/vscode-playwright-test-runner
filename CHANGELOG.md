@@ -13,6 +13,31 @@
   - Parse top-level Playwright `stats` and direct `flaky` test statuses.
   - Synchronize flaky status to CodeLens (`$(warning) Flaky`).
   - Refined title matching and scope discovery to eliminate phantom `skipped` tests and cross-suite naming collisions.
+- **High-Performance Static AST Discovery**:
+  - Instant in-memory static AST test parsing (< 3ms per file) powered by `@babel/parser` supporting TypeScript, JSX, decorators, and modern syntax, backed by background CLI reconciliation.
+  - Built-in syntax error recovery and resilient regex fallback parser keep CodeLenses completely stable without jumping or disappearing while editing.
+  - Added `playwrightCodeLensRunner.codeLens.fastStaticDiscovery` configuration setting.
+- **CodeLens Live Execution Feedback & Outcome Badges**:
+  - Real-time running spinner (`$(sync~spin) Running…`) rendered directly in the CodeLens line when a companion run is active.
+  - Inline outcome badges (`$(pass) Passed (140ms)` or `$(error) Failed (view failure)`) on completion. Clicking a failed badge navigates directly to the exact failure line in the file.
+  - Added `playwrightCodeLensRunner.codeLens.showLastRunStatus` and `playwrightCodeLensRunner.codeLens.showRunningStatus` settings.
+- **Gutter Deduplication & Visual Density Controls**:
+  - Added `codeLens.layout: "companion-only"` to hide redundant native Run/Debug actions and promote companion workflows (`Run Companion`, `Inspect`, `Playwright UI`, `Flake Lab`).
+  - Added `playwrightCodeLensRunner.codeLens.density: "standard" | "short" | "icon-only"` setting to optimize editor vertical footprint.
+  - Contributed `companionRun` and `flake` to configurable custom layout actions (`playwrightCodeLensRunner.codeLens.customActions`).
+- **Managed Report Server Lifecycle & Interactive Controls**:
+  - Managed single active report server terminal backed by `ReportSessionManager` — opening a new report automatically cancels any existing report server to avoid orphaned CLI processes and port conflicts.
+  - Added **Stop Report Server** (`playwrightCodeLensRunner.stopReportServer`) and **Restart Report Server** (`playwrightCodeLensRunner.restartReportServer`) commands with inline action buttons in the Playwright Artifacts and Runs sidebars.
+  - Added **Stop Interactive Session** (`playwrightCodeLensRunner.stopInteractiveSession`) command to terminate running Playwright UI or Inspector sessions.
+  - Sidebar tree view shows real-time active report status (`Active: Report (<name>)`) and marks serving report artifacts with active status and inline controls.
+- **Companion Runner, Browser Settings & Run Controls**:
+  - Added `playwrightCodeLensRunner.browser` top-level setting with fallback hierarchy across companion, Flake Lab, and inspector runs.
+  - Added project alias and case-insensitive substring matching (e.g. `chromium` matches `Desktop Chrome`).
+  - Added `playwrightCodeLensRunner.companion.showCliOutput` setting (`never`, `on-run`, `on-failure`).
+  - Added `playwrightCodeLensRunner.flakeLab.size` setting and **Run Flake Lab with Custom Count…** (`playwrightCodeLensRunner.flakeLabWithSize`) command.
+  - Added **Cancel Companion Run** (`playwrightCodeLensRunner.cancelCompanionRun`) command with inline stop buttons.
+  - Added multi-run history retention (`playwrightCodeLensRunner.sidebar.historySize`) and **Clear Run History** (`playwrightCodeLensRunner.clearRuns`) command.
+
 
 ## 3.3.0 - 2026-09-04
 
