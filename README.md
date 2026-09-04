@@ -53,7 +53,7 @@ Loop-generated tests remain one declaration. Microsoft Testing Run/Debug and the
 
 **Flake Lab** is a companion CLI run for the current file, suite, test, or generated-case declaration. It deliberately does not create a native VS Code test run. By default it uses `--repeat-each 10`, `--workers 1`, `--retries 1`, `--trace on`, and `--fail-on-flaky-tests`; the last flag requires Playwright Test 1.52 or later.
 
-The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, provides live test execution progress with individual status icons (`running`, `passed`, `failed`, `skipped`), provides **Rerun Failed**, and links back to Microsoft Testing for native results. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide this managed Runs view and launch Companion runs, Flake Lab, or cached failed-test reruns directly in an integrated terminal instead. Terminal-only runs use the generated Playwright arguments without the managed JSON reporter or summary updates; the Artifacts view remains available.
+The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, and tracks each Playwright worker from exact test start/end events. Concurrent runs show completed and active counts (for example, `3/10 completed · 5 running`), while each finished test receives its result immediately without changing the status of tests that are still running. Flake Lab keeps one row per source test and aggregates its repetitions into live completed/running counts and final clean, flaky, failed, or skipped outcomes. The view also provides **Rerun Failed** and links back to Microsoft Testing for native results. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide this managed Runs view and launch Companion runs, Flake Lab, or cached failed-test reruns directly in an integrated terminal instead. Terminal-only runs use the generated Playwright arguments without the managed reporters or summary updates; the Artifacts view remains available.
 
 The companion’s **More…** menu also provides changed and last-failed Playwright UI launches, discovered-tag actions, UI profiles, and Artifact Center. **Open Changed Tests in Playwright UI** uses `--only-changed` for uncommitted changes by default or a supplied Git ref; **Open Last Failed Tests in Playwright UI** uses Playwright’s persisted last-run data. These are target-scoped: they preserve the resolved config and selected companion projects without adding the current test title filter.
 
@@ -217,6 +217,7 @@ npm run typecheck      # TypeScript 7
 npm run typecheck:ts6  # TypeScript 6 parity (temporary)
 npm run lint           # ESLint, zero warnings allowed
 npm run check:unused   # Knip
+npm run test:reporter  # Reporter compatibility against supported Playwright fixtures
 npm test
 npm run package
 npm run vsix

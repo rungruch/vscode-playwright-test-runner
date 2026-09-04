@@ -32,6 +32,10 @@ const builds = [{
   ...shared,
   entryPoints: ['src/extension.ts'],
   outfile: 'dist/extension.cjs',
+}, {
+  ...shared,
+  entryPoints: ['src/companionReporter.ts'],
+  outfile: 'dist/companionReporter.cjs',
 }];
 
 async function main() {

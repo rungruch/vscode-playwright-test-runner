@@ -49,12 +49,14 @@ interface JsonStats {
 }
 
 interface JsonReport {
+  config?: { rootDir?: string };
   suites?: JsonSuite[];
   errors?: JsonResultError[];
   stats?: JsonStats;
 }
 
 export interface ParsedCompanionReport {
+  rootDir?: string;
   total: number;
   passed: number;
   failed: number;
@@ -81,6 +83,9 @@ export function parseCompanionJsonReport(text: string): ParsedCompanionReport | 
     failures: [],
     tests: [],
   };
+  if (typeof report.config?.rootDir === 'string') {
+    summary.rootDir = report.config.rootDir;
+  }
   for (const suite of report.suites) {
     visitSuite(suite, [], undefined, undefined, summary);
   }
@@ -115,47 +120,55 @@ export function withParsedReport(
     return run;
   }
 
-  // Aggregate multiple runs/repetitions of the same test definition (e.g. Flake Lab repeatEach)
-  const aggregatedParsed: CompanionTestItem[] = [];
-  let detectedFlakeTests = 0;
+  const parsedTests = parsed.tests.map((test) => ({
+    ...test,
+    file: absoluteReportFile(test.file, parsed.rootDir ?? run.cwd),
+  }));
+  const parsedFailures = parsed.failures.map((failure) => ({
+    ...failure,
+    file: absoluteReportFile(failure.file, parsed.rootDir ?? run.cwd),
+  }));
 
-  for (const parsedTest of parsed.tests) {
-    const existing = aggregatedParsed.find((t) => isSameTest(t, parsedTest));
-    if (!existing) {
-      const isPassed = parsedTest.status === 'passed';
-      const isFailed = parsedTest.status === 'failed';
-      const isFlaky = parsedTest.status === 'flaky';
-      aggregatedParsed.push({
+  // Aggregate multiple projects/repetitions of the same source test.
+  const aggregatedParsed: CompanionTestItem[] = [];
+  for (const parsedTest of parsedTests) {
+    let aggregate = aggregatedParsed.find((test) => isSameTest(test, parsedTest));
+    if (!aggregate) {
+      aggregate = {
         ...parsedTest,
-        totalRuns: 1,
-        passedRuns: isPassed ? 1 : 0,
-        failedRuns: isFailed ? 1 : 0,
-      });
-      if (isFlaky) {
-        detectedFlakeTests++;
-      }
-    } else {
-      existing.totalRuns = (existing.totalRuns ?? 1) + 1;
-      if (parsedTest.status === 'passed') {
-        existing.passedRuns = (existing.passedRuns ?? 0) + 1;
-      } else if (parsedTest.status === 'failed') {
-        existing.failedRuns = (existing.failedRuns ?? 0) + 1;
-      }
-      existing.durationMs = (existing.durationMs ?? 0) + (parsedTest.durationMs ?? 0);
-      if (parsedTest.message && !existing.message) {
-        existing.message = parsedTest.message;
-      }
-      if (parsedTest.status === 'flaky' || (existing.passedRuns && existing.failedRuns)) {
-        if (existing.status !== 'flaky') {
-          detectedFlakeTests++;
-        }
-        existing.status = 'flaky';
-      } else if (existing.failedRuns && !existing.passedRuns) {
-        existing.status = 'failed';
-      } else if (existing.passedRuns && !existing.failedRuns) {
-        existing.status = 'passed';
-      }
+        status: 'pending',
+        durationMs: 0,
+        totalRuns: 0,
+        completedRuns: 0,
+        activeRuns: 0,
+        passedRuns: 0,
+        failedRuns: 0,
+        skippedRuns: 0,
+        flakyRuns: 0,
+      };
+      aggregatedParsed.push(aggregate);
     }
+
+    aggregate.totalRuns = (aggregate.totalRuns ?? 0) + 1;
+    aggregate.completedRuns = (aggregate.completedRuns ?? 0) + 1;
+    aggregate.durationMs = (aggregate.durationMs ?? 0) + (parsedTest.durationMs ?? 0);
+    if (parsedTest.status === 'passed') {
+      aggregate.passedRuns = (aggregate.passedRuns ?? 0) + 1;
+    } else if (parsedTest.status === 'failed') {
+      aggregate.failedRuns = (aggregate.failedRuns ?? 0) + 1;
+    } else if (parsedTest.status === 'flaky') {
+      aggregate.passedRuns = (aggregate.passedRuns ?? 0) + 1;
+      aggregate.flakyRuns = (aggregate.flakyRuns ?? 0) + 1;
+    } else if (parsedTest.status === 'skipped') {
+      aggregate.skippedRuns = (aggregate.skippedRuns ?? 0) + 1;
+    }
+    if (parsedTest.message && !aggregate.message) {
+      aggregate.message = parsedTest.message;
+    }
+  }
+
+  for (const aggregate of aggregatedParsed) {
+    aggregate.status = aggregateStatus(aggregate);
   }
 
   const mergedTests = run.tests ? run.tests.map((t) => ({ ...t })) : [];
@@ -163,26 +176,60 @@ export function withParsedReport(
     for (const aggTest of aggregatedParsed) {
       const idx = mergedTests.findIndex((t) => isSameTest(t, aggTest));
       if (idx >= 0) {
-        mergedTests[idx] = { ...mergedTests[idx], ...aggTest };
+        const existing = mergedTests[idx];
+        mergedTests[idx] = {
+          ...existing,
+          ...aggTest,
+          id: existing.id,
+          title: existing.title,
+          file: existing.file ?? aggTest.file,
+          line: existing.line ?? aggTest.line,
+        };
       } else {
         mergedTests.push(aggTest);
       }
     }
   }
 
+  const detectedFlakeTests = aggregatedParsed.filter((test) => test.status === 'flaky').length;
   const totalFlaky = Math.max(parsed.flaky, detectedFlakeTests);
 
   return {
     ...run,
-    total: parsed.total,
+    total: Math.max(run.total, parsed.total),
     passed: parsed.passed,
     failed: parsed.failed,
     skipped: parsed.skipped,
     flaky: totalFlaky,
     durationMs: Math.max(run.durationMs, parsed.durationMs),
-    failures: parsed.failures,
+    failures: parsedFailures,
     tests: mergedTests.length > 0 ? mergedTests : run.tests,
+    currentTest: undefined,
+    completedTests: parsed.total,
+    activeTests: 0,
   };
+}
+
+function absoluteReportFile(file: string | undefined, cwd: string): string | undefined {
+  if (!file) {
+    return undefined;
+  }
+  return path.normalize(path.isAbsolute(file) ? file : path.resolve(cwd, file));
+}
+
+function aggregateStatus(test: CompanionTestItem): CompanionTestStatus {
+  const passed = test.passedRuns ?? 0;
+  const failed = test.failedRuns ?? 0;
+  if ((test.flakyRuns ?? 0) > 0 || (passed > 0 && failed > 0)) {
+    return 'flaky';
+  }
+  if (failed > 0) {
+    return 'failed';
+  }
+  if (passed > 0) {
+    return 'passed';
+  }
+  return (test.skippedRuns ?? 0) > 0 ? 'skipped' : 'pending';
 }
 
 function stripTags(title: string): string {
@@ -204,9 +251,12 @@ function stripFilePrefix(title: string): string {
 }
 
 function isSameTest(a: CompanionTestItem, b: CompanionTestItem): boolean {
-  if (a.file && b.file && path.normalize(a.file) === path.normalize(b.file)) {
-    if (a.line !== undefined && b.line !== undefined && a.line === b.line) {
-      return true;
+  if (a.file && b.file) {
+    if (path.normalize(a.file) !== path.normalize(b.file)) {
+      return false;
+    }
+    if (a.line !== undefined && b.line !== undefined && a.line !== b.line) {
+      return false;
     }
   }
   return isTitleMatch(a.title, b.title);
@@ -273,13 +323,22 @@ function visitSpec(
       summary.flaky++;
     }
     const testTitle = titlePath.join(' › ') || 'Unnamed Playwright test';
+    const isExpected = test.status === 'expected';
+    const isUnexpected = test.status === 'unexpected';
     const testStatus: CompanionTestStatus = isFlaky
       ? 'flaky'
-      : final.status === 'passed'
-        ? 'passed'
-        : final.status === 'skipped'
-          ? 'skipped'
-          : 'failed';
+      : test.status === 'skipped' || final.status === 'skipped'
+        ? 'skipped'
+        : isExpected
+          ? 'passed'
+          : isUnexpected
+            ? 'failed'
+            : final.status === 'passed'
+              ? 'passed'
+              : 'failed';
+    const diagnosticResult = isFlaky
+      ? results.find((result) => isFailure(result.status ?? 'unknown')) ?? final
+      : final;
     summary.tests.push({
       id: `${file ?? ''}:${line ?? 1}:${testTitle}${test.projectName ? `:${test.projectName}` : ''}`,
       title: testTitle,
@@ -287,12 +346,12 @@ function visitSpec(
       line,
       status: testStatus,
       durationMs: totalDuration,
-      message: testStatus === 'failed' || testStatus === 'flaky' ? errorMessage(final) : undefined,
+      message: testStatus === 'failed' || testStatus === 'flaky' ? errorMessage(diagnosticResult) : undefined,
       project: test.projectName,
     });
-    if (final.status === 'passed') {
+    if (testStatus === 'passed' || testStatus === 'flaky') {
       summary.passed++;
-    } else if (final.status === 'skipped') {
+    } else if (testStatus === 'skipped') {
       summary.skipped++;
     } else {
       summary.failed++;
@@ -337,120 +396,6 @@ function parseJsonObject(text: string): unknown {
   }
 }
 
-export interface RunningProgressInfo {
-  title?: string;
-  index?: number;
-  total?: number;
-  file?: string;
-  line?: number;
-  column?: number;
-  project?: string;
-  totalAnnounced?: number;
-  failedTitle?: string;
-  isRetry?: boolean;
-}
-
-/**
- * Structured extraction of progress from Playwright CLI stdout/stderr line reporter text.
- */
-export function extractRunningProgress(text: string): RunningProgressInfo | undefined {
-  const lines = text.split(/\r?\n/);
-  let result: RunningProgressInfo | undefined;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-
-    // Header: "Running X tests using Y workers"
-    const runningMatch = /^Running\s+(\d+)\s+tests?\b/i.exec(line);
-    if (runningMatch) {
-      result = { ...result, totalAnnounced: parseInt(runningMatch[1], 10) };
-      continue;
-    }
-
-    // Line reporter format:
-    // [1/5] [browserless] › tests/example.spec.ts:4:7 › Math › adds numbers
-    // [12/17] (retries) [chromium] › tests/calendar.spec.ts:631:9 › ... (retry #1)
-    // or [browserless] › tests/example.spec.ts:4:7 › Math › adds numbers
-    // or [1/5] › tests/example.spec.ts:4:7 › Math › adds numbers
-    const isRetry = /\((?:retries|retry(?:\s*#\d+)?)\)/i.test(line);
-    const testLineMatch = /^(?:\[(\d+)\/(\d+)\]\s+)?(?:\((?:retries|retry(?:\s*#\d+)?)\)\s+)?(?:\[([^\]]+)\]\s+›\s+)?(?:([^:\s]+):(\d+):(\d+)\s+›\s+)?(.+)$/.exec(line);
-    if (testLineMatch) {
-      const idx = testLineMatch[1] ? parseInt(testLineMatch[1], 10) : undefined;
-      const tot = testLineMatch[2] ? parseInt(testLineMatch[2], 10) : undefined;
-      const project = testLineMatch[3]?.trim();
-      const file = testLineMatch[4]?.trim();
-      const lineNum = testLineMatch[5] ? parseInt(testLineMatch[5], 10) : undefined;
-      const col = testLineMatch[6] ? parseInt(testLineMatch[6], 10) : undefined;
-      let title = testLineMatch[7]?.trim();
-
-      if (idx !== undefined || project || (file && lineNum !== undefined)) {
-        title = title ? title.replace(/^[^:\s]+:\d+:\d+\s+›\s+/, '').trim() : '';
-        title = title ? title.replace(/\s*\(retry\s*#\d+\)$/i, '').trim() : '';
-        if (title) {
-          result = {
-            ...result,
-            index: idx,
-            total: tot,
-            project: project || undefined,
-            file: file || undefined,
-            line: lineNum,
-            column: col,
-            title,
-            isRetry: isRetry || undefined,
-          };
-        }
-      }
-    }
-
-    // Failure marker: "  1) [browser] › file:line:col › title ---------------------"
-    const failMatch = /^\s*\d+\)\s+(?:\[([^\]]+)\]\s+›\s+)?(?:([^:\s]+):(\d+):(\d+)\s+›\s+)?(.+)$/.exec(line);
-    if (failMatch) {
-      let rawFail = failMatch[5]?.trim();
-      if (rawFail) {
-        rawFail = rawFail.replace(/\s*-+$/g, '').trim();
-        rawFail = rawFail.replace(/^[^:\s]+:\d+:\d+\s+›\s+/, '').trim();
-        if (rawFail) {
-          result = {
-            ...result,
-            failedTitle: rawFail,
-          };
-        }
-      }
-    }
-  }
-
-  return result;
-}
-
-/**
- * Best-effort extraction of the active test title from Playwright CLI stdout/stderr line reporter text.
- * Expects Playwright's standard line reporter format: `[browser] › file.spec.ts:line:col › Suite › Test Title`
- */
-export function extractRunningTestTitle(text: string): string | undefined {
-  const progress = extractRunningProgress(text);
-  if (progress?.title) {
-    return progress.title;
-  }
-  const lines = text.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trim();
-    if (!line) {
-      continue;
-    }
-    const match = /\[[^\]]+\]\s+›\s+(.+)$/.exec(line);
-    if (match) {
-      const raw = match[1].replace(/^[^:]+:\d+:\d+\s+›\s+/, '').trim();
-      if (raw) {
-        return raw;
-      }
-    }
-  }
-  return undefined;
-}
-
 export interface TestRunStatus {
   status: 'running' | 'passed' | 'failed' | 'flaky';
   durationMs?: number;
@@ -471,32 +416,26 @@ export function lookupTestRunStatus(
     return undefined;
   }
   const normalizedFile = path.normalize(file);
-
-  // 1. Check active run execution
-  if (hasActiveRun && summary.status === 'running') {
-    const activeTest = summary.tests?.find((t) => (
-      t.status === 'running'
-      && (!t.file || path.normalize(t.file) === normalizedFile)
-      && (t.line === line + 1 || isTitlePathMatch(t.title, titlePath))
-    ));
-    if (activeTest) {
-      return { status: 'running' };
-    }
-    if (summary.currentTest && isTitlePathMatch(summary.currentTest, titlePath)) {
-      return { status: 'running' };
-    }
-  }
-
-  // If still actively running other tests, do not report stale completed statuses
-  if (summary.status === 'running') {
-    return undefined;
-  }
-
-  // 2. Check tests in summary first for exact test status (including flaky and passed)
-  const testItem = summary.tests?.find((t) => (
-    (!t.file || path.normalize(t.file) === normalizedFile)
-    && (t.line === line + 1 || isTitlePathMatch(t.title, titlePath))
+  const testItem = summary.tests?.find((test) => (
+    (!test.file || path.normalize(test.file) === normalizedFile)
+    && (test.line === line + 1 || isTitlePathMatch(test.title, titlePath))
   ));
+
+  // Persisted running summaries are stale after extension reload. Live runs can
+  // safely expose both active and already-completed status from reporter events.
+  if (summary.status === 'running') {
+    if (!hasActiveRun) {
+      return undefined;
+    }
+    if (testItem?.status === 'running') {
+      return { status: 'running' };
+    }
+    if (!testItem && summary.currentTest && isTitlePathMatch(summary.currentTest, titlePath)) {
+      return { status: 'running' };
+    }
+  }
+
+  // Check the exact test status, including tests completed while other workers run.
   if (testItem) {
     if (testItem.status === 'flaky') {
       return { status: 'flaky', durationMs: testItem.durationMs };
@@ -513,7 +452,7 @@ export function lookupTestRunStatus(
     }
   }
 
-  // 3. Fallback: check failures
+  // Fallback: check failures
   const failure = summary.failures.find((f) => (
     (!f.file || path.normalize(f.file) === normalizedFile)
     && (f.line === line + 1 || isTitlePathMatch(f.title, titlePath) || isArrayMatch(f.titlePath, titlePath))
@@ -540,4 +479,3 @@ function isArrayMatch(a?: string[], b?: string[]): boolean {
   }
   return a.every((val, i) => val === b[i]);
 }
-

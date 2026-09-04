@@ -1,7 +1,5 @@
 import * as assert from 'assert';
 import {
-  extractRunningProgress,
-  extractRunningTestTitle,
   isTitleMatch,
   lookupTestRunStatus,
   parseCompanionJsonReport,
@@ -103,71 +101,24 @@ suite('companionReport', () => {
       tests: [],
     });
   });
-});
 
-suite('extractRunningProgress and extractRunningTestTitle', () => {
-  test('extracts progress, project, location and title from line reporter format', () => {
-    const line = '[1/5] [browserless] › tests/example.spec.ts:4:7 › Math › adds numbers';
-    const progress = extractRunningProgress(line);
-    assert.ok(progress);
-    assert.strictEqual(progress.index, 1);
-    assert.strictEqual(progress.total, 5);
-    assert.strictEqual(progress.project, 'browserless');
-    assert.strictEqual(progress.file, 'tests/example.spec.ts');
-    assert.strictEqual(progress.line, 4);
-    assert.strictEqual(progress.column, 7);
-    assert.strictEqual(progress.title, 'Math › adds numbers');
-    assert.strictEqual(extractRunningTestTitle(line), 'Math › adds numbers');
-  });
+  test('treats an expected failure as passed outcome', () => {
+    const parsed = parseCompanionJsonReport(JSON.stringify({
+      suites: [{
+        title: 'tests/expected.spec.ts',
+        file: '/ws/tests/expected.spec.ts',
+        specs: [{
+          title: 'known failure',
+          line: 3,
+          tests: [{ expectedStatus: 'failed', status: 'expected', results: [{ status: 'failed', duration: 4 }] }],
+        }],
+      }],
+    }));
 
-  test('extracts total announced tests from header', () => {
-    const line = 'Running 25 tests using 4 workers';
-    const progress = extractRunningProgress(line);
-    assert.ok(progress);
-    assert.strictEqual(progress.totalAnnounced, 25);
-  });
-
-  test('extracts title from line reporter format with location prefix', () => {
-    const line = '[chromium] › tests/calendar_single.spec.ts:37:9 › Verify Single Calendar UI › Verify Popover Calendar Container @calendar';
-    const title = extractRunningTestTitle(line);
-    assert.strictEqual(title, 'Verify Single Calendar UI › Verify Popover Calendar Container @calendar');
-  });
-
-  test('extracts title from multi-line terminal chunk', () => {
-    const chunk = [
-      'Running 20 tests using 1 worker',
-      '[chromium] › tests/calendar_single.spec.ts:10:5 › Suite A › Test One',
-      '[chromium] › tests/calendar_single.spec.ts:54:9 › Verify Single Calendar UI › Verify Popover Navigation Button',
-    ].join('\n');
-    const title = extractRunningTestTitle(chunk);
-    assert.strictEqual(title, 'Verify Single Calendar UI › Verify Popover Navigation Button');
-  });
-
-  test('returns undefined for non-line-reporter text', () => {
-    assert.strictEqual(extractRunningTestTitle('Starting Playwright CLI...'), undefined);
-    assert.strictEqual(extractRunningTestTitle(''), undefined);
-  });
-
-  test('extracts retry line with (retries) prefix and cleans retry tag', () => {
-    const line = '[12/17] (retries) [chromium] › tests/calendar_range.spec.ts:631:9 › Verify Range Calendar Logic › Verify Select Date on Range Date Selection Calendar - Select Single Date @calendar (retry #1)';
-    const progress = extractRunningProgress(line);
-    assert.ok(progress);
-    assert.strictEqual(progress.index, 12);
-    assert.strictEqual(progress.total, 17);
-    assert.strictEqual(progress.project, 'chromium');
-    assert.strictEqual(progress.file, 'tests/calendar_range.spec.ts');
-    assert.strictEqual(progress.line, 631);
-    assert.strictEqual(progress.column, 9);
-    assert.strictEqual(progress.isRetry, true);
-    assert.strictEqual(progress.title, 'Verify Range Calendar Logic › Verify Select Date on Range Date Selection Calendar - Select Single Date @calendar');
-    assert.strictEqual(extractRunningTestTitle(line), 'Verify Range Calendar Logic › Verify Select Date on Range Date Selection Calendar - Select Single Date @calendar');
-  });
-
-  test('extracts failed title from failure marker line with trailing dashes', () => {
-    const line = '  1) [chromium] › tests/calendar_range.spec.ts:631:9 › Verify Range Calendar Logic › Verify Select Date --------------------';
-    const progress = extractRunningProgress(line);
-    assert.ok(progress);
-    assert.strictEqual(progress.failedTitle, 'Verify Range Calendar Logic › Verify Select Date');
+    assert.ok(parsed);
+    assert.strictEqual(parsed.passed, 1);
+    assert.strictEqual(parsed.failed, 0);
+    assert.strictEqual(parsed.tests[0].status, 'passed');
   });
 });
 
@@ -227,6 +178,26 @@ suite('lookupTestRunStatus', () => {
 
   test('returns undefined when no matching test is executing in active run', () => {
     const status = lookupTestRunStatus(runningSummary, true, '/ws/tests/auth.spec.ts', 20, ['authentication', 'other']);
+    assert.strictEqual(status, undefined);
+  });
+
+  test('returns a completed result immediately while another test is running', () => {
+    const summary: CompanionRunSummary = {
+      ...runningSummary,
+      passed: 1,
+      completedTests: 1,
+      activeTests: 1,
+      tests: [
+        { id: '1', title: 'authentication › logs in', file: '/ws/tests/auth.spec.ts', line: 10, status: 'running' },
+        { id: '2', title: 'authentication › loads profile', file: '/ws/tests/auth.spec.ts', line: 20, status: 'passed', durationMs: 25 },
+      ],
+    };
+    const status = lookupTestRunStatus(summary, true, '/ws/tests/auth.spec.ts', 19, ['authentication', 'loads profile']);
+    assert.deepStrictEqual(status, { status: 'passed', durationMs: 25 });
+  });
+
+  test('does not expose a persisted running summary when no process is active', () => {
+    const status = lookupTestRunStatus(runningSummary, false, '/ws/tests/auth.spec.ts', 9, ['authentication', 'logs in']);
     assert.strictEqual(status, undefined);
   });
 
@@ -314,8 +285,11 @@ suite('withParsedReport', () => {
     assert.ok(test);
     assert.strictEqual(test.status, 'flaky');
     assert.strictEqual(test.totalRuns, 5);
+    assert.strictEqual(test.completedRuns, 5);
+    assert.strictEqual(test.activeRuns, 0);
     assert.strictEqual(test.passedRuns, 4);
     assert.strictEqual(test.failedRuns, 1);
+    assert.strictEqual(test.skippedRuns, 0);
     assert.strictEqual(test.durationMs, 120);
     assert.strictEqual(test.message, 'timeout');
   });
@@ -360,7 +334,73 @@ suite('withParsedReport', () => {
     assert.strictEqual(updated.flaky, 0);
     assert.strictEqual(updated.tests?.[0].status, 'passed');
     assert.strictEqual(updated.tests?.[0].totalRuns, 3);
+    assert.strictEqual(updated.tests?.[0].completedRuns, 3);
     assert.strictEqual(updated.tests?.[0].passedRuns, 3);
+  });
+
+  test('counts a recovered flaky repetition as passed and flaky', () => {
+    const updated = withParsedReport({
+      ...runForParsedReport(),
+      total: 1,
+    }, {
+      total: 1,
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      flaky: 1,
+      durationMs: 20,
+      failures: [],
+      tests: [
+        { id: '1', title: 'Math › retries', file: '/ws/tests/example.spec.ts', line: 8, status: 'flaky', durationMs: 20 },
+      ],
+    });
+
+    assert.strictEqual(updated.tests?.[0].status, 'flaky');
+    assert.strictEqual(updated.tests?.[0].passedRuns, 1);
+    assert.strictEqual(updated.tests?.[0].failedRuns, 0);
+    assert.strictEqual(updated.tests?.[0].flakyRuns, 1);
+  });
+
+  test('reconciles rootDir-relative JSON paths with the existing live row', () => {
+    const initialRun: CompanionRunSummary = {
+      ...runForParsedReport(),
+      total: 1,
+      tests: [{
+        id: 'live-row',
+        title: 'Math › adds',
+        file: '/ws/tests/example.spec.ts',
+        line: 4,
+        status: 'running',
+        totalRuns: 1,
+        activeRuns: 1,
+      }],
+    };
+    const updated = withParsedReport(initialRun, {
+      rootDir: '/ws/tests',
+      total: 1,
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      flaky: 0,
+      durationMs: 18,
+      failures: [],
+      tests: [{
+        id: 'json-row',
+        title: 'example.spec.ts › Math › adds',
+        file: 'example.spec.ts',
+        line: 4,
+        status: 'passed',
+        durationMs: 18,
+      }],
+    });
+
+    assert.strictEqual(updated.tests?.length, 1);
+    assert.strictEqual(updated.tests?.[0].id, 'live-row');
+    assert.strictEqual(updated.tests?.[0].title, 'Math › adds');
+    assert.strictEqual(updated.tests?.[0].file, '/ws/tests/example.spec.ts');
+    assert.strictEqual(updated.tests?.[0].status, 'passed');
+    assert.strictEqual(updated.tests?.[0].activeRuns, 0);
+    assert.strictEqual(updated.tests?.[0].completedRuns, 1);
   });
 });
 
@@ -376,3 +416,23 @@ suite('isTitleMatch', () => {
   });
 });
 
+function runForParsedReport(): CompanionRunSummary {
+  return {
+    id: 'parsed-run',
+    kind: 'flake-lab',
+    targetId: 't1',
+    cwd: '/ws',
+    status: 'running',
+    startedAt: 1000,
+    durationMs: 0,
+    total: 0,
+    passed: 0,
+    failed: 0,
+    skipped: 0,
+    flaky: 0,
+    failures: [],
+    args: [],
+    selection: { files: ['/ws/tests/example.spec.ts'], titleFilters: [] },
+    projects: [],
+  };
+}

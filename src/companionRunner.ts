@@ -3,15 +3,17 @@ import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
-  extractRunningProgress,
-  isTitleMatch,
   lookupTestRunStatus,
   parseCompanionJsonReport,
-  RunningProgressInfo,
   TestRunStatus,
   withParsedReport,
 } from './core/companionReport';
-import { CompanionCliRunRequest, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
+import {
+  CompanionLiveRunTracker,
+  CompanionReporterEventDecoder,
+  COMPANION_REPORTER_RUN_ID_ENV,
+} from './core/companionLive';
+import { CompanionCliRunRequest, CompanionRunSummary } from './core/companionTypes';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 import { Settings } from './settings';
@@ -30,12 +32,14 @@ export class CompanionCliRunner implements vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel('Playwright CodeLens Runner');
   private readonly emitter = new vscode.EventEmitter<CompanionRunSummary | undefined>();
   private readonly active = new Map<string, { cancel(): void }>();
+  private readonly reporterPath: string;
   private latest: CompanionRunSummary | undefined;
   private history: CompanionRunSummary[] = [];
 
   readonly onDidChange = this.emitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.reporterPath = context.asAbsolutePath(path.join('dist', 'companionReporter.cjs'));
     this.latest = context.workspaceState.get<CompanionRunSummary>(LATEST_RUN_STATE_KEY);
     const saved = context.workspaceState.get<CompanionRunSummary[]>(RUN_HISTORY_STATE_KEY);
     this.history = Array.isArray(saved) ? saved : (this.latest ? [this.latest] : []);
@@ -96,8 +100,18 @@ export class CompanionCliRunner implements vscode.Disposable {
       args: request.args,
       selection: request.selection,
       projects: request.projects,
-      tests: initialTests.length > 0 ? initialTests.map((t) => ({ ...t })) : undefined,
+      tests: initialTests.length > 0 ? initialTests.map((t) => ({
+        ...t,
+        totalRuns: request.kind === 'flake-lab' ? repeatEach : 1,
+        completedRuns: 0,
+        activeRuns: 0,
+        passedRuns: 0,
+        failedRuns: 0,
+        skippedRuns: 0,
+        flakyRuns: 0,
+      })) : undefined,
       completedTests: 0,
+      activeTests: 0,
       repeatEach: request.repeatEach,
     };
     await this.persist(summary, settings.sidebarHistorySize);
@@ -109,85 +123,59 @@ export class CompanionCliRunner implements vscode.Disposable {
 
     let tempDirectory: string | undefined;
     let collectedOutput = '';
-    let lastIndex: number | undefined;
-    const append = (text: string) => {
-      collectedOutput = trimOutput(`${collectedOutput}${text}`);
-      this.output.append(text);
-      const progress = extractRunningProgress(text);
-      if (!progress) {
+    const decoder = new CompanionReporterEventDecoder(id);
+    const liveTracker = new CompanionLiveRunTracker(target.cwd, summary.tests);
+    const appendVisible = (text: string) => {
+      if (!text) {
         return;
       }
-
-      let updated = false;
-      let newTotal = summary.total;
-      if (progress.totalAnnounced && progress.totalAnnounced > newTotal) {
-        newTotal = progress.totalAnnounced;
-        updated = true;
-      } else if (progress.total && progress.total > newTotal) {
-        newTotal = progress.total;
-        updated = true;
+      collectedOutput = trimOutput(`${collectedOutput}${text}`);
+      this.output.append(text);
+    };
+    const publishLive = (next: CompanionRunSummary) => {
+      if (next === summary) {
+        return;
       }
-
-      const indexChanged = progress.index !== undefined && progress.index !== lastIndex;
-      if (progress.index !== undefined) {
-        lastIndex = progress.index;
+      summary = next;
+      this.latest = summary;
+      const existingIdx = this.history.findIndex((run) => run.id === summary.id);
+      if (existingIdx >= 0) {
+        this.history[existingIdx] = summary;
+      } else {
+        this.history = [summary, ...this.history];
       }
-
-      const currentTest = progress.title;
-      const titleChanged = Boolean(currentTest && currentTest !== summary.currentTest);
-
-      if (indexChanged || titleChanged || updated || progress.failedTitle) {
-        const completedCount = progress.index !== undefined ? Math.max(0, progress.index - 1) : summary.completedTests;
-        const updatedTests = (currentTest || progress.failedTitle)
-          ? updateRunningTests(summary.tests ?? [], progress)
-          : summary.tests;
-        summary = {
-          ...summary,
-          total: newTotal,
-          currentTest: currentTest ?? summary.currentTest,
-          completedTests: completedCount,
-          durationMs: Date.now() - startedAt,
-          tests: updatedTests,
-        };
-        this.latest = summary;
-        const existingIdx = this.history.findIndex((r) => r.id === summary.id);
-        if (existingIdx >= 0) {
-          this.history[existingIdx] = summary;
-        } else {
-          this.history = [summary, ...this.history];
-        }
-        this.emitter.fire(summary);
+      this.emitter.fire(summary);
+    };
+    const appendStdout = (text: string) => {
+      const decoded = decoder.push(text);
+      appendVisible(decoded.output);
+      if (decoded.events.length > 0) {
+        publishLive(liveTracker.apply(summary, decoded.events, Date.now() - startedAt));
       }
     };
     try {
       tempDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'playwright-codelens-run-'));
       const resultFile = path.join(tempDirectory, 'result.json');
-      const running = spawnCommand(target.cli, [...request.args, '--reporter=line,json'], {
+      const running = spawnCommand(target.cli, [...request.args, `--reporter=line,json,${this.reporterPath}`], {
         cwd: target.cwd,
         env: {
           ...request.env,
           // Playwright's JSON reporter honours this path while stdout remains
           // a compatible fallback for older supported releases.
           PLAYWRIGHT_JSON_OUTPUT_NAME: resultFile,
+          [COMPANION_REPORTER_RUN_ID_ENV]: id,
         },
         cancellation,
-        onStdout: append,
-        onStderr: append,
+        onStdout: appendStdout,
+        onStderr: appendVisible,
       });
       this.active.set(id, running);
       const outcome = await running.outcome;
+      appendVisible(decoder.flush());
+      summary = liveTracker.finish(summary, outcome.cancelled, Date.now() - startedAt);
       const report = await readResult(resultFile) ?? collectedOutput;
-      summary = withParsedReport(summary, parseCompanionJsonReport(report));
-      if (summary.tests) {
-        summary.tests = summary.tests.map((t) => {
-          if (t.status === 'running') {
-            if (outcome.cancelled) {
-              return { ...t, status: 'pending' as const };
-            }
-            return { ...t, status: outcome.exitCode === 0 ? 'passed' as const : 'failed' as const };
-          }
-          return t;
-        });
+      if (!outcome.cancelled) {
+        summary = withParsedReport(summary, parseCompanionJsonReport(report));
       }
       summary = {
         ...summary,
@@ -208,6 +196,7 @@ export class CompanionCliRunner implements vscode.Disposable {
       await this.persist(summary, settings.sidebarHistorySize);
       return summary;
     } catch (error) {
+      summary = liveTracker.finish(summary, false, Date.now() - startedAt);
       summary = {
         ...summary,
         durationMs: Date.now() - startedAt,
@@ -262,7 +251,7 @@ export class CompanionCliRunner implements vscode.Disposable {
   }
 
   private commandPreview(target: RunTarget, args: string[]): string {
-    return [target.cli.executable, ...target.cli.argsPrefix, ...args, '--reporter=line,json'].join(' ');
+    return [target.cli.executable, ...target.cli.argsPrefix, ...args, `--reporter=line,json,${this.reporterPath}`].join(' ');
   }
 }
 
@@ -277,58 +266,3 @@ async function readResult(file: string): Promise<string | undefined> {
 function trimOutput(value: string): string {
   return value.length > OUTPUT_TAIL_LIMIT ? value.slice(-OUTPUT_TAIL_LIMIT) : value;
 }
-
-function updateRunningTests(tests: CompanionTestItem[], progress: RunningProgressInfo): CompanionTestItem[] {
-  const result: CompanionTestItem[] = tests.map((t) => ({ ...t }));
-
-  if (progress.failedTitle) {
-    for (const t of result) {
-      if (isTitleMatch(t.title, progress.failedTitle)) {
-        t.status = 'failed';
-      }
-    }
-  }
-
-  if (progress.title) {
-    const runningTitle = progress.title;
-    let matched = false;
-    for (const t of result) {
-      const matchByLoc = Boolean(
-        progress.file && t.file && path.normalize(progress.file) === path.normalize(t.file)
-        && progress.line !== undefined && t.line === progress.line,
-      );
-      if (matchByLoc || isTitleMatch(t.title, runningTitle)) {
-        if (progress.isRetry) {
-          t.status = 'flaky';
-        } else if (t.status !== 'failed') {
-          t.status = 'running';
-        }
-        if (progress.project && !t.project) {
-          t.project = progress.project;
-        }
-        if (progress.file && !t.file) {
-          t.file = progress.file;
-        }
-        if (progress.line !== undefined && !t.line) {
-          t.line = progress.line;
-        }
-        matched = true;
-        break;
-      }
-    }
-
-    if (!matched) {
-      result.push({
-        id: progress.file && progress.line ? `${progress.file}:${progress.line}:${runningTitle}` : runningTitle,
-        title: runningTitle,
-        file: progress.file,
-        line: progress.line,
-        project: progress.project,
-        status: progress.isRetry ? 'flaky' : 'running',
-      });
-    }
-  }
-
-  return result;
-}
-

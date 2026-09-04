@@ -1,5 +1,11 @@
 # Change Log
 
+## Unreleased
+
+- Replace line-output status inference with structured Playwright lifecycle events for managed Companion and Flake Lab runs.
+- Track every concurrent worker accurately, update completed results immediately, and show exact completed/running counts without prematurely marking active tests as passed.
+- Aggregate parallel Flake Lab repetitions per source test with live pass, failure, skip, retry, and flaky counts.
+
 ## 3.4.0 - 2026-09-04
 
 - **Flake Lab & Companion Run Sidebar UI/UX**:

@@ -12,8 +12,12 @@ export interface CompanionTestItem {
   message?: string;
   project?: string;
   totalRuns?: number;
+  completedRuns?: number;
+  activeRuns?: number;
   passedRuns?: number;
   failedRuns?: number;
+  skippedRuns?: number;
+  flakyRuns?: number;
 }
 
 /** A structured, extension-owned CLI invocation. */
@@ -65,6 +69,7 @@ export interface CompanionRunSummary {
   tests?: CompanionTestItem[];
   output?: string;
   completedTests?: number;
+  activeTests?: number;
   repeatEach?: number;
 }
 

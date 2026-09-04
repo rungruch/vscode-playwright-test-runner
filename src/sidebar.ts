@@ -117,9 +117,13 @@ export class PlaywrightSidebar implements vscode.Disposable {
       const isRunning = run.status === 'running';
       let totalsLabel: string;
       if (isRunning) {
-        const completed = run.completedTests ?? 0;
+        const completed = completedRunCount(run);
+        const active = activeRunCount(run);
         const progressPart = run.total > 0 ? `${completed}/${run.total} completed` : 'running';
         const statsParts: string[] = [progressPart];
+        if (active > 0) {
+          statsParts.push(`${active} running`);
+        }
         if (run.passed > 0) {
           statsParts.push(`${run.passed} passed`);
         }
@@ -204,14 +208,13 @@ export class PlaywrightSidebar implements vscode.Disposable {
       );
 
       if (run.status === 'running') {
-        const completed = run.completedTests ?? 0;
-        const currentIdx = completed + 1;
-        const totalStr = run.total > 0 ? ` [${Math.min(currentIdx, run.total)}/${run.total}]` : '';
-        const runSuffix = run.kind === 'flake-lab' && repeatEach && repeatEach > 1
-          ? ` (run ${Math.min(currentIdx, run.total)}/${run.total})`
-          : '';
-        const testName = run.currentTest ? ` · ${run.currentTest}` : '';
-        item.description = `running${totalStr}${runSuffix}${testName}`;
+        const completed = completedRunCount(run);
+        const active = activeRunCount(run);
+        const parts = run.total > 0 ? [`${completed}/${run.total} completed`] : [];
+        if (active > 0) {
+          parts.push(`${active} running`);
+        }
+        item.description = parts.length > 0 ? parts.join(' · ') : 'running';
       } else if (run.status === 'passed') {
         item.description = run.flaky > 0
           ? `flaky (${run.flaky} flaky) · ${formatDuration(run.durationMs)}`
@@ -246,7 +249,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
         `- **Failed**: ${run.failed}\n` +
         `- **Flaky**: ${run.flaky}\n` +
         `- **Skipped**: ${run.skipped}\n` +
-        (run.currentTest && run.status === 'running' ? `- **Active Test**: \`${run.currentTest}\`\n` : '') +
+        (run.status === 'running' ? `- **Active**: ${activeRunCount(run)}\n` : '') +
         (run.configFile ? `- **Config**: \`${path.basename(run.configFile)}\`\n` : '') +
         (run.projects && run.projects.length > 0 ? `- **Projects**: ${run.projects.join(', ')}\n` : ''),
       );
@@ -269,16 +272,27 @@ export class PlaywrightSidebar implements vscode.Disposable {
     if (element.type === 'testCase') {
       const test = element.test;
       const item = new vscode.TreeItem(test.title, vscode.TreeItemCollapsibleState.None);
-      if (test.status === 'running') {
-        item.description = test.totalRuns && test.totalRuns > 1
-          ? `running (${(test.passedRuns ?? 0) + (test.failedRuns ?? 0) + 1}/${test.totalRuns})`
-          : 'running';
+      const totalRuns = test.totalRuns ?? 1;
+      const completedRuns = completedTestCount(test);
+      const activeRuns = test.activeRuns ?? (test.status === 'running' ? 1 : 0);
+      if (test.status === 'running' || completedRuns < totalRuns) {
+        if (totalRuns > 1) {
+          const progress = [`${completedRuns}/${totalRuns} completed`];
+          if (activeRuns > 0) {
+            progress.push(`${activeRuns} running`);
+          } else if (test.status === 'running') {
+            progress.push('retrying');
+          }
+          item.description = progress.join(' · ');
+        } else {
+          item.description = activeRuns > 0 ? 'running' : test.status === 'running' ? 'retrying' : 'pending';
+        }
       } else if (test.status === 'flaky') {
-        item.description = test.totalRuns && test.totalRuns > 1
-          ? `flaky · ${test.passedRuns ?? 0}/${test.totalRuns} passed`
+        item.description = totalRuns > 1
+          ? `flaky · ${iterationOutcomeParts(test).join(' · ')}`
           : 'flaky';
-      } else if (test.totalRuns && test.totalRuns > 1) {
-        item.description = `${test.passedRuns}/${test.totalRuns} passed · ${formatDuration(test.durationMs ?? 0)}`;
+      } else if (totalRuns > 1) {
+        item.description = `${iterationOutcomeParts(test).join(' · ')} · ${formatDuration(test.durationMs ?? 0)}`;
       } else if (test.durationMs !== undefined && test.durationMs > 0) {
         item.description = formatDuration(test.durationMs);
       } else {
@@ -310,8 +324,9 @@ export class PlaywrightSidebar implements vscode.Disposable {
         };
       }
 
-      const runsInfo = test.totalRuns && test.totalRuns > 1
-        ? `- **Iterations**: ${test.passedRuns ?? 0} passed, ${test.failedRuns ?? 0} failed (of ${test.totalRuns})\n`
+      const runsInfo = totalRuns > 1
+        ? `- **Iterations**: ${completedRuns}/${totalRuns} completed, ${activeRuns} running\n`
+          + `- **Outcomes**: ${test.passedRuns ?? 0} passed, ${test.failedRuns ?? 0} failed, ${test.skippedRuns ?? 0} skipped\n`
         : '';
       item.tooltip = new vscode.MarkdownString(
         `**${test.title}**\n\n` +
@@ -411,6 +426,50 @@ export class PlaywrightSidebar implements vscode.Disposable {
 
 function iconFor(kind: ArtifactRecord['kind']): string {
   return kind === 'trace' ? 'pulse' : kind === 'blob-report' ? 'archive' : kind === 'attachment' ? 'file-media' : 'globe';
+}
+
+function completedRunCount(run: CompanionRunSummary): number {
+  return run.completedTests ?? run.passed + run.failed + run.skipped;
+}
+
+function activeRunCount(run: CompanionRunSummary): number {
+  if (run.activeTests !== undefined) {
+    return run.activeTests;
+  }
+  return run.tests?.reduce((total, test) => total + (test.activeRuns ?? (test.status === 'running' ? 1 : 0)), 0) ?? 0;
+}
+
+function completedTestCount(test: CompanionTestItem): number {
+  if (test.completedRuns !== undefined) {
+    return test.completedRuns;
+  }
+  if (test.passedRuns !== undefined || test.failedRuns !== undefined || test.skippedRuns !== undefined) {
+    return (test.passedRuns ?? 0) + (test.failedRuns ?? 0) + (test.skippedRuns ?? 0);
+  }
+  return test.status === 'passed' || test.status === 'failed' || test.status === 'flaky' || test.status === 'skipped'
+    ? test.totalRuns ?? 1
+    : 0;
+}
+
+function iterationOutcomeParts(test: CompanionTestItem): string[] {
+  const passed = test.passedRuns ?? 0;
+  const failed = test.failedRuns ?? 0;
+  const skipped = test.skippedRuns ?? 0;
+  const total = test.totalRuns ?? 1;
+  if (passed > 0 && failed === 0 && skipped === 0) {
+    return [`${passed}/${total} passed`];
+  }
+  const parts: string[] = [];
+  if (passed > 0) {
+    parts.push(`${passed} passed`);
+  }
+  if (failed > 0) {
+    parts.push(`${failed} failed`);
+  }
+  if (skipped > 0) {
+    parts.push(`${skipped} skipped`);
+  }
+  return parts.length > 0 ? parts : ['no results'];
 }
 
 function formatDuration(durationMs: number): string {

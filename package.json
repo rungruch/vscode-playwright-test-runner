@@ -929,9 +929,10 @@
     "pretest": "npm run check",
     "test": "npm run test:unit && npm run test:extension",
     "test:unit": "npm run test:compile && mocha --config .mocharc.json",
-    "test:extension": "npm run package && npm run test:compile && npm run test:fixture && vscode-test",
+    "test:extension": "npm run package && npm run test:compile && npm run test:fixture && npm run test:reporter && vscode-test",
     "test:compile": "node scripts/clean-test-output.mjs && tsc -p ./ --stableTypeOrdering",
     "test:fixture": "npm ci --prefix fixtures/basic --ignore-scripts && npm ci --prefix fixtures/multipkg --ignore-scripts && npm ci --prefix fixtures/pw138 --ignore-scripts",
+    "test:reporter": "node scripts/test-companion-reporter.mjs",
     "test:watch": "tsc -watch -p ./ --stableTypeOrdering",
     "vsix": "vsce package --no-dependencies"
   },
