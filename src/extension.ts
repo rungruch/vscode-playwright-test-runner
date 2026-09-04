@@ -7,6 +7,7 @@ import { DiscoveryService } from './discoveryService';
 import { InteractiveSessionManager } from './interactiveSessions';
 import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
+import { ReportSessionManager } from './reportSession';
 import { PlaywrightSidebar } from './sidebar';
 
 export interface ExtensionApi {
@@ -28,10 +29,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const runner = new CompanionCliRunner(context);
   const artifacts = new ArtifactService();
   const sessions = new InteractiveSessionManager();
-  const sidebar = new PlaywrightSidebar(context, runner, artifacts, sessions);
+  const reportSession = new ReportSessionManager();
+  const sidebar = new PlaywrightSidebar(context, runner, artifacts, sessions, reportSession);
 
-  context.subscriptions.push(discovery, runner, artifacts, sessions);
-  registerCommands({ context, discovery, bridge, projects, runner, artifacts, sessions, sidebar });
+  context.subscriptions.push(discovery, runner, artifacts, sessions, reportSession);
+  registerCommands({ context, discovery, bridge, projects, runner, artifacts, sessions, reportSession, sidebar });
   registerCodeLensSupport(context, discovery);
 
   await bridge.activate();

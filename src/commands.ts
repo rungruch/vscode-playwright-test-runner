@@ -6,7 +6,6 @@ import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestIte
 import { ForcedBrowser, resolveBrowserPreference } from './core/inspectorBrowser';
 import { dispatchManagedRun } from './core/managedRunDispatch';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
-import { buildShowReportArguments } from './core/reportServer';
 import {
   buildChangedUiArguments,
   buildCompanionTestArguments,
@@ -27,6 +26,7 @@ import { probeCliVersion } from './executor';
 import { InteractiveSessionManager } from './interactiveSessions';
 import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
+import { ReportSessionManager } from './reportSession';
 import { RunTarget, targetLabel } from './runTarget';
 import { Settings } from './settings';
 import { PlaywrightSidebar } from './sidebar';
@@ -39,6 +39,7 @@ export interface CommandDeps {
   runner: CompanionCliRunner;
   artifacts: ArtifactService;
   sessions: InteractiveSessionManager;
+  reportSession: ReportSessionManager;
   sidebar: PlaywrightSidebar;
 }
 
@@ -90,6 +91,9 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.showCompanionOutput', () => deps.runner.showOutput());
   register('playwrightCodeLensRunner.openMicrosoftTesting', () => vscode.commands.executeCommand('workbench.view.extension.test'));
 
+  register('playwrightCodeLensRunner.stopInteractiveSession', () => deps.sessions.stop());
+  register('playwrightCodeLensRunner.stopReportServer', () => deps.reportSession.stop());
+  register('playwrightCodeLensRunner.restartReportServer', () => restartReportServerCommand(deps));
   register('playwrightCodeLensRunner.showReport', () => showReportCommand(deps));
   register('playwrightCodeLensRunner.showTrace', (uri?: vscode.Uri) => showTraceCommand(deps, uri));
   register('playwrightCodeLensRunner.recordTest', (uri?: vscode.Uri) => recordTestCommand(deps, uri));
@@ -814,13 +818,20 @@ async function openArtifactCommand(deps: CommandDeps, artifact: ArtifactRecord):
     return;
   }
   if (artifact.kind === 'report' || artifact.kind === 'report-zip') {
-    runInTerminal(target, 'Playwright Report', buildShowReportArguments(artifact.path));
+    deps.reportSession.launch(target, artifact.path);
   } else if (artifact.kind === 'trace') {
     runInTerminal(target, 'Playwright Trace', ['show-trace', artifact.path]);
   } else {
     await vscode.commands.executeCommand('vscode.open', vscode.Uri.file(artifact.path));
   }
   await focusCompanionFor(target);
+}
+
+async function restartReportServerCommand(deps: CommandDeps): Promise<void> {
+  if (deps.reportSession.restart()) {
+    return;
+  }
+  await openLatestReportCommand(deps);
 }
 
 async function revealArtifactCommand(artifact: ArtifactRecord): Promise<void> {
@@ -1032,7 +1043,8 @@ function scheduleNativeFocus(file: string): void {
 async function showReportCommand(deps: CommandDeps): Promise<void> {
   const target = await pickTarget(deps, 'Show HTML report for which Playwright config?');
   if (target) {
-    runInTerminal(target, 'Playwright Report', buildShowReportArguments());
+    deps.reportSession.launch(target);
+    await focusCompanionFor(target);
   }
 }
 

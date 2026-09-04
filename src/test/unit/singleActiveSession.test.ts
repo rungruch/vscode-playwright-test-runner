@@ -42,4 +42,16 @@ suite('SingleActiveSession', () => {
     assert.strictEqual(active.handle, undefined);
     assert.strictEqual(active.value, undefined);
   });
+
+  test('disposes active handle and clears state on dispose', () => {
+    const active = new SingleActiveSession<FakeHandle, string>();
+    let disposed = 0;
+    const handle: FakeHandle = { name: 'report', dispose: () => { disposed += 1; } };
+    active.replace(() => ({ handle, value: 'report' }));
+
+    active.dispose();
+    assert.strictEqual(disposed, 1);
+    assert.strictEqual(active.handle, undefined);
+    assert.strictEqual(active.value, undefined);
+  });
 });

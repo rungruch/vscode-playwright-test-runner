@@ -52,6 +52,14 @@ export class InteractiveSessionManager implements vscode.Disposable {
     terminal.show(true);
   }
 
+  stop(): void {
+    if (!this.active.value) {
+      return;
+    }
+    this.active.dispose();
+    this.emitter.fire(this.sessions);
+  }
+
   dispose(): void {
     this.closeListener.dispose();
     this.active.dispose();

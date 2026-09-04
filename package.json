@@ -620,6 +620,24 @@
         "title": "Run Flake Lab on This Test",
         "category": "Playwright",
         "icon": "$(beaker)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.stopReportServer",
+        "title": "Stop Playwright Report Server",
+        "category": "Playwright",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.restartReportServer",
+        "title": "Restart Playwright Report Server",
+        "category": "Playwright",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.stopInteractiveSession",
+        "title": "Stop Interactive Session",
+        "category": "Playwright",
+        "icon": "$(stop)"
       }
     ],
     "viewsContainers": {
@@ -677,24 +695,29 @@
           "group": "navigation@6"
         },
         {
-          "command": "playwrightCodeLensRunner.openArtifactCenter",
+          "command": "playwrightCodeLensRunner.stopReportServer",
           "when": "view == playwrightCodeLensRunner.artifactsView",
           "group": "navigation@1"
         },
         {
-          "command": "playwrightCodeLensRunner.openLatestReport",
+          "command": "playwrightCodeLensRunner.openArtifactCenter",
           "when": "view == playwrightCodeLensRunner.artifactsView",
           "group": "navigation@2"
         },
         {
-          "command": "playwrightCodeLensRunner.openLatestTrace",
+          "command": "playwrightCodeLensRunner.openLatestReport",
           "when": "view == playwrightCodeLensRunner.artifactsView",
           "group": "navigation@3"
         },
         {
-          "command": "playwrightCodeLensRunner.mergeBlobReports",
+          "command": "playwrightCodeLensRunner.openLatestTrace",
           "when": "view == playwrightCodeLensRunner.artifactsView",
           "group": "navigation@4"
+        },
+        {
+          "command": "playwrightCodeLensRunner.mergeBlobReports",
+          "when": "view == playwrightCodeLensRunner.artifactsView",
+          "group": "navigation@5"
         }
       ],
       "view/item/context": [
@@ -721,6 +744,31 @@
         {
           "command": "playwrightCodeLensRunner.flakeSingleCompanionTest",
           "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionTestCase",
+          "group": "inline@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.restartReportServer",
+          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionReportSession",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.stopReportServer",
+          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionReportSession",
+          "group": "inline@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.stopInteractiveSession",
+          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionInteractiveSession",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.restartReportServer",
+          "when": "view == playwrightCodeLensRunner.artifactsView && (viewItem == playwrightArtifact.report.serving || viewItem == playwrightArtifact.report-zip.serving)",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.stopReportServer",
+          "when": "view == playwrightCodeLensRunner.artifactsView && (viewItem == playwrightArtifact.report.serving || viewItem == playwrightArtifact.report-zip.serving)",
           "group": "inline@2"
         },
         {

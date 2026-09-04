@@ -4,6 +4,7 @@ import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
 import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
 import { InteractiveSession, InteractiveSessionManager } from './interactiveSessions';
+import { ReportSession, ReportSessionManager } from './reportSession';
 import { RunTarget } from './runTarget';
 
 type RunElement =
@@ -12,6 +13,7 @@ type RunElement =
   | { type: 'testCase'; test: CompanionTestItem }
   | { type: 'failure'; failure: CompanionFailure }
   | { type: 'session'; session: InteractiveSession }
+  | { type: 'reportSession'; session: ReportSession }
   | { type: 'action'; label: string; command: string; icon: string; args?: unknown[] };
 
 /** Tree providers for the companion-only run summary and local artifacts. */
@@ -25,6 +27,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
     private readonly runner: CompanionCliRunner,
     private readonly artifacts: ArtifactService,
     private readonly sessions: InteractiveSessionManager,
+    private readonly reportSession: ReportSessionManager,
   ) {
     this.disposables = [
       this.runEmitter,
@@ -41,6 +44,10 @@ export class PlaywrightSidebar implements vscode.Disposable {
       }),
       this.runner.onDidChange(() => this.runEmitter.fire(undefined)),
       this.sessions.onDidChange(() => this.runEmitter.fire(undefined)),
+      this.reportSession.onDidChange(() => {
+        this.runEmitter.fire(undefined);
+        this.artifactEmitter.fire(undefined);
+      }),
       this.artifacts.onDidChange(() => this.artifactEmitter.fire(undefined)),
     ];
     context.subscriptions.push(this);
@@ -63,10 +70,22 @@ export class PlaywrightSidebar implements vscode.Disposable {
   private runChildren(element?: RunElement): RunElement[] {
     if (!element) {
       const runs = this.runner.runs;
+      const report = this.reportSession.currentSession;
+      const reportItems: RunElement[] = report ? [{ type: 'reportSession', session: report }] : [];
+      const sessionItems: RunElement[] = this.sessions.sessions.map((session) => ({ type: 'session' as const, session }));
+      const reportActions: RunElement[] = report
+        ? [
+            { type: 'action', label: 'Restart Report Server', command: 'playwrightCodeLensRunner.restartReportServer', icon: 'refresh' },
+            { type: 'action', label: 'Stop Report Server', command: 'playwrightCodeLensRunner.stopReportServer', icon: 'stop' },
+          ]
+        : [{ type: 'action', label: 'Open Browser Report', command: 'playwrightCodeLensRunner.openLatestReport', icon: 'globe' }];
+
       if (runs.length === 0) {
         return [
-          ...this.sessions.sessions.map((session) => ({ type: 'session' as const, session })),
+          ...sessionItems,
+          ...reportItems,
           { type: 'action', label: 'No companion CLI runs yet', command: 'playwrightCodeLensRunner.openMicrosoftTesting', icon: 'beaker' },
+          ...reportActions,
           { type: 'action', label: 'Open UI Profile…', command: 'playwrightCodeLensRunner.openUiProfile', icon: 'remote' },
           { type: 'action', label: 'Show Companion Output', command: 'playwrightCodeLensRunner.showCompanionOutput', icon: 'output' },
         ];
@@ -80,8 +99,9 @@ export class PlaywrightSidebar implements vscode.Disposable {
         items.push({ type: 'historyGroup', runs: previousRuns });
       }
       items.push(
-        ...this.sessions.sessions.map((session) => ({ type: 'session' as const, session })),
-        { type: 'action', label: 'Open Browser Report', command: 'playwrightCodeLensRunner.openLatestReport', icon: 'globe' },
+        ...sessionItems,
+        ...reportItems,
+        ...reportActions,
         { type: 'action', label: 'Open UI Profile…', command: 'playwrightCodeLensRunner.openUiProfile', icon: 'remote' },
         { type: 'action', label: 'Open Microsoft Testing', command: 'playwrightCodeLensRunner.openMicrosoftTesting', icon: 'beaker' },
         { type: 'action', label: 'Show Companion Output', command: 'playwrightCodeLensRunner.showCompanionOutput', icon: 'output' },
@@ -216,12 +236,33 @@ export class PlaywrightSidebar implements vscode.Disposable {
       item.contextValue = 'playwrightCompanionFailure';
       return item;
     }
+    if (element.type === 'reportSession') {
+      const reportPath = element.session.reportPath;
+      const reportLabel = reportPath ? `Active: Report (${path.basename(reportPath)})` : 'Active: Playwright Report';
+      const item = new vscode.TreeItem(reportLabel, vscode.TreeItemCollapsibleState.None);
+      item.description = 'serving';
+      item.tooltip = new vscode.MarkdownString(
+        `**Playwright Report Server (Active)**\n\n` +
+        `- **Target**: \`${element.session.target.configFile ?? element.session.target.cwd}\`\n` +
+        (reportPath ? `- **Report**: \`${reportPath}\`\n` : '') +
+        `- **Started**: ${new Date(element.session.startedAt).toLocaleTimeString()}\n\n` +
+        `Use $(refresh) to restart or $(stop) to cancel the report server CLI.`,
+      );
+      item.iconPath = new vscode.ThemeIcon('globe');
+      item.contextValue = 'playwrightCompanionReportSession';
+      return item;
+    }
     if (element.type === 'session') {
       const item = new vscode.TreeItem(`Active: ${element.session.name}`, vscode.TreeItemCollapsibleState.None);
       item.description = 'Companion CLI session';
-      item.tooltip = 'The active global UI/Inspector session. Another interactive launch replaces it.';
+      item.tooltip = new vscode.MarkdownString(
+        `**Interactive CLI Session (Active)**\n\n` +
+        `- **Name**: ${element.session.name}\n` +
+        `- **Started**: ${new Date(element.session.startedAt).toLocaleTimeString()}\n\n` +
+        `Use $(stop) to cancel this session.`,
+      );
       item.iconPath = new vscode.ThemeIcon('terminal');
-      item.contextValue = 'playwrightCompanionSession';
+      item.contextValue = 'playwrightCompanionInteractiveSession';
       return item;
     }
     const item = new vscode.TreeItem(element.label, vscode.TreeItemCollapsibleState.None);
@@ -236,10 +277,16 @@ export class PlaywrightSidebar implements vscode.Disposable {
     const date = new Date(record.modifiedAt);
     const timeStr = date.toLocaleTimeString();
     const dateStr = date.toLocaleDateString();
-    item.description = `${dateStr} ${timeStr}`;
+    const isServing = Boolean(
+      (record.kind === 'report' || record.kind === 'report-zip') &&
+      this.reportSession.isRunning &&
+      this.reportSession.currentSession?.reportPath === record.path,
+    );
+    item.description = isServing ? `${dateStr} ${timeStr} · serving` : `${dateStr} ${timeStr}`;
     item.tooltip = new vscode.MarkdownString(
       `**Playwright Artifact**: ${record.label}\n\n` +
       `- **Type**: ${record.kind}\n` +
+      (isServing ? `- **Status**: Serving (active report server)\n` : '') +
       `- **Modified**: ${dateStr} ${timeStr}\n` +
       `- **Path**: \`${record.path}\``,
     );
@@ -249,8 +296,8 @@ export class PlaywrightSidebar implements vscode.Disposable {
       title: 'Open artifact',
       arguments: [record],
     };
-    item.iconPath = new vscode.ThemeIcon(iconFor(record.kind));
-    item.contextValue = `playwrightArtifact.${record.kind}`;
+    item.iconPath = new vscode.ThemeIcon(isServing ? 'globe' : iconFor(record.kind));
+    item.contextValue = isServing ? `playwrightArtifact.${record.kind}.serving` : `playwrightArtifact.${record.kind}`;
     return item;
   }
 }

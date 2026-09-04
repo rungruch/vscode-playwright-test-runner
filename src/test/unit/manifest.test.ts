@@ -121,6 +121,9 @@ suite('extension manifest', () => {
       'playwrightCodeLensRunner.openLatestTrace',
       'playwrightCodeLensRunner.mergeBlobReports',
       'playwrightCodeLensRunner.openUiProfile',
+      'playwrightCodeLensRunner.stopReportServer',
+      'playwrightCodeLensRunner.restartReportServer',
+      'playwrightCodeLensRunner.stopInteractiveSession',
     ]) {
       assert.ok(commands.has(command), `${command} is contributed`);
     }
