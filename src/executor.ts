@@ -138,8 +138,10 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
         timedOut: stopReason === 'timeout',
       });
     };
-    child.stdout?.on('data', (data: Buffer) => options.onStdout?.(data.toString('utf8')));
-    child.stderr?.on('data', (data: Buffer) => options.onStderr?.(data.toString('utf8')));
+    child.stdout?.setEncoding('utf8');
+    child.stdout?.on('data', (data: string) => options.onStdout?.(data));
+    child.stderr?.setEncoding('utf8');
+    child.stderr?.on('data', (data: string) => options.onStderr?.(data));
     child.on('error', (error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') {
         options.onStderr?.(`Command not found: ${cli.executable}\n`);

@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "3.4.0",
+  "version": "4.0.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -306,7 +306,7 @@
             "minimum": 1,
             "maximum": 10,
             "default": 3,
-            "markdownDescription": "Number of recent companion CLI runs retained in the Playwright Runs sidebar.",
+            "markdownDescription": "Number of completed companion CLI runs retained in the Playwright Runs sidebar. Active runs are retained until completion.",
             "scope": "window"
           },
           "playwrightCodeLensRunner.artifacts.scanDirectories": {
@@ -383,7 +383,7 @@
           "playwrightCodeLensRunner.codeLens.fastStaticDiscovery": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Use instant static AST parsing (<3ms) to eliminate editor layout jumping on file open, followed by background CLI reconciliation.",
+            "markdownDescription": "Render cached source actions before CLI discovery finishes, then reconcile ownership and generated cases in the background. Companion execution saves and verifies the selected document.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.fileActions": {
@@ -929,6 +929,7 @@
     "pretest": "npm run check",
     "test": "npm run test:unit && npm run test:extension",
     "test:unit": "npm run test:compile && mocha --config .mocharc.json",
+    "benchmark:core": "npm run test:compile && node scripts/benchmark-core.mjs",
     "test:extension": "npm run package && npm run test:compile && npm run test:fixture && npm run test:reporter && vscode-test",
     "test:compile": "node scripts/clean-test-output.mjs && tsc -p ./ --stableTypeOrdering",
     "test:fixture": "npm ci --prefix fixtures/basic --ignore-scripts && npm ci --prefix fixtures/multipkg --ignore-scripts && npm ci --prefix fixtures/pw138 --ignore-scripts",

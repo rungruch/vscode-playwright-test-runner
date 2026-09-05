@@ -55,6 +55,8 @@ Loop-generated tests remain one declaration. Microsoft Testing Run/Debug and the
 
 The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, and tracks each Playwright worker from exact test start/end events. Concurrent runs show completed and active counts (for example, `3/10 completed · 5 running`), while each finished test receives its result immediately without changing the status of tests that are still running. Flake Lab keeps one row per source test and aggregates its repetitions into live completed/running counts and final clean, flaky, failed, or skipped outcomes. The view also provides **Rerun Failed** and links back to Microsoft Testing for native results. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide this managed Runs view and launch Companion runs, Flake Lab, or cached failed-test reruns directly in an integrated terminal instead. Terminal-only runs use the generated Playwright arguments without the managed reporters or summary updates; the Artifacts view remains available.
 
+Live reporter events are processed in order and published to CodeLens and the sidebar in batches of up to 100 ms. Run start and final results publish immediately. Concurrent runs keep their launch order, and clearing history retains active runs and their cancellation controls. The history-size setting limits completed runs.
+
 The companion’s **More…** menu also provides changed and last-failed Playwright UI launches, discovered-tag actions, UI profiles, and Artifact Center. **Open Changed Tests in Playwright UI** uses `--only-changed` for uncommitted changes by default or a supplied Git ref; **Open Last Failed Tests in Playwright UI** uses Playwright’s persisted last-run data. These are target-scoped: they preserve the resolved config and selected companion projects without adding the current test title filter.
 
 Tag actions use discovered `@tags` and structured `--grep @tag` arguments for UI, Inspector, and copied terminal commands. The extension keeps one global UI/Inspector terminal: launching any new interactive action cancels the current Playwright UI or Inspector session before starting the requested target or profile.
@@ -139,9 +141,13 @@ Microsoft's enabled configs and projects are private to the official extension a
 
 **Configure CLI Projects** stores a separate project selection for Inspector and Playwright UI. This separation is intentional: changing companion CLI projects cannot silently alter the official Testing view.
 
-The **CLI Config** file lens is also companion-only. CodeLens resolves ownership noninteractively: it revalidates a remembered choice, otherwise selects a deterministic config whose Playwright discovery owns the file. Use **Select CLI Config for File** to choose another overlapping config and remember it for that file. Configs may own sibling directories or tests in another workspace root; they do not need to be ancestors of the test file.
+With `codeLens.fastStaticDiscovery` enabled (the default), CodeLens renders source-based actions before CLI ownership discovery finishes. Parsed declarations are cached by document version. Background CLI discovery supplies the verified config, projects, and generated cases; unsaved edits keep their current source positions. Disable this setting to wait for CLI verification before rendering actions.
 
-Saved and externally changed test/config files invalidate affected discovery caches. Known persisted or discovered owners are refreshed together, so cross-root and sibling layouts do not go stale after generators, Git operations, or edits outside VS Code.
+Companion Run, Flake Lab, Inspector, and scoped Playwright UI actions save the selected test document before verifying its declaration and launching. Failed-test reruns save their selected test files. If saving fails, the selection disappears, or the source changes during preparation, the action stops with a message to retry the current selection. Native Run and Debug remain owned by Microsoft Testing.
+
+The **CLI Config** file lens is also companion-only. Its initial target can be provisional. Background discovery resolves ownership noninteractively: it revalidates a remembered choice, otherwise selects a deterministic config whose Playwright discovery owns the file. Use **Select CLI Config for File** to choose another overlapping config and remember it for that file. Configs may own sibling directories or tests in another workspace root; they do not need to be ancestors of the test file.
+
+Saved and externally changed test files invalidate affected targets’ test data, retain CLI-version metadata, and refresh changed or visible files after a short debounce. Full inventories are rebuilt for explicit refreshes, config changes, or commands that need them. Known persisted or discovered owners are refreshed together, including sibling and cross-root layouts. File discovery retains open documents and up to 128 inactive entries per target; explicit Retry rechecks the CLI version.
 
 ## Commands
 
@@ -218,10 +224,13 @@ npm run typecheck:ts6  # TypeScript 6 parity (temporary)
 npm run lint           # ESLint, zero warnings allowed
 npm run check:unused   # Knip
 npm run test:reporter  # Reporter compatibility against supported Playwright fixtures
+npm run benchmark:core # Warmed median timings for 250, 1,000, and 2,000 tests
 npm test
 npm run package
 npm run vsix
 ```
+
+The core benchmark is separate from unit-test gates. It measures reporter planning, all test-status lookups (including index construction), and final-report reconciliation using three warmup runs and seven measured runs. Compare results on the same machine; real workspace discovery also depends on Playwright and test configuration.
 
 ### TypeScript 7 and TypeScript 6 side by side
 

@@ -7,6 +7,8 @@ export interface CompanionTestItem {
   title: string;
   file?: string;
   line?: number;
+  column?: number;
+  titlePath?: string[];
   status: CompanionTestStatus;
   durationMs?: number;
   message?: string;
@@ -42,6 +44,7 @@ export interface CompanionFailure {
   title: string;
   file?: string;
   line?: number;
+  column?: number;
   message?: string;
   /** Full title path when Playwright's JSON reporter provides it. */
   titlePath?: string[];

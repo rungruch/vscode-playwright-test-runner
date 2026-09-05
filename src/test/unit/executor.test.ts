@@ -9,6 +9,16 @@ const NODE: CliCommand = {
 };
 
 suite('executor', () => {
+  test('preserves reporter text when UTF-8 characters span output chunks', async () => {
+    let stdout = '';
+    const running = spawnCommand(NODE, ['-e', `
+      const bytes = Buffer.from('ทดสอบ 🧪');
+      process.stdout.write(bytes.subarray(0, 2));
+      setTimeout(() => process.stdout.write(bytes.subarray(2)), 10);
+    `], { cwd: process.cwd(), env: {}, onStdout: (text) => { stdout += text; } });
+    assert.strictEqual((await running.outcome).exitCode, 0);
+    assert.strictEqual(stdout, 'ทดสอบ 🧪');
+  });
   test('reports a normal process outcome', async () => {
     let stdout = '';
     const running = spawnCommand(NODE, ['-e', 'process.stdout.write("ready")'], {

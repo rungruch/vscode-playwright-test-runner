@@ -11,6 +11,11 @@ type EditorTestSelectionKind = 'file' | 'suite' | 'test';
 export interface EditorTestSelection {
   kind: EditorTestSelectionKind;
   targetId: string;
+  discoverySource?: 'ast' | 'cli';
+  documentVersion?: number;
+  discoveryRevision?: number;
+  columnMissing?: boolean;
+  declarationsOnLine?: number;
   uri: string;
   file: string;
   position: {
@@ -51,7 +56,16 @@ export function editorSelectionsForFile(
     appendTest(selections, model.id, uri, test, []);
   }
 
-  return collapseSelections(selections).sort((a, b) => {
+  const collapsed = collapseSelections(selections);
+  const lineCounts = new Map<string, number>();
+  for (const selection of collapsed) {
+    const key = `${selection.kind}:${selection.position.line}`;
+    lineCounts.set(key, (lineCounts.get(key) ?? 0) + 1);
+  }
+  for (const selection of collapsed) {
+    selection.declarationsOnLine = lineCounts.get(`${selection.kind}:${selection.position.line}`);
+  }
+  return collapsed.sort((a, b) => {
     if (a.kind === 'file' && b.kind === 'file') {
       return 0;
     }
@@ -81,6 +95,7 @@ function appendSuite(
       uri,
       file,
       position: toPosition(suite.location.line, suite.location.column),
+      columnMissing: suite.location.column <= 0,
       fullTitle: titles.join(' '),
       titlePath: titles,
     });
@@ -109,6 +124,7 @@ function appendTest(
     uri,
     file: test.location.file,
     position: toPosition(test.location.line, test.location.column),
+    columnMissing: test.location.column <= 0,
     fullTitle: test.fullTitle,
     titlePath: [...parentTitles, test.title],
   });

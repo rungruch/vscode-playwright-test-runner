@@ -1,8 +1,10 @@
 import * as assert from 'assert';
+import './runtime.test';
 import * as vscode from 'vscode';
 import { EditorTestSelection } from '../../core/editorSelections';
 import { cliSelectionForEditor } from '../../core/selectionArguments';
 import type { ExtensionApi } from '../../extension';
+import { CompanionCliRunRequest, CompanionRunSummary } from '../../core/companionTypes';
 
 suite('Playwright CodeLens Runner extension', () => {
   let api: ExtensionApi;
@@ -65,6 +67,99 @@ suite('Playwright CodeLens Runner extension', () => {
     assert.ok(!commands.has('playwrightCliRunner.migrateSettings'));
     assert.ok(!commands.has('playwright.runTest'));
     assert.ok(!commands.has('playwright.debugTest'));
+  });
+
+  test('saves a companion selection and preserves an explicitly supplied overlapping config', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'companion-save.spec.ts');
+    const config = vscode.Uri.joinPath(fixture.uri, 'playwright.companion-save.config.ts');
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', uri);
+    const previousFocus = configuration.inspect<boolean>('sidebar.autoFocus')?.globalValue;
+    const originalRun = api.runner.run;
+    let captured: CompanionCliRunRequest | undefined;
+    try {
+      await configuration.update('sidebar.autoFocus', false, vscode.ConfigurationTarget.Global);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from("import { test } from '@playwright/test';\ntest('before save', async () => {});\n"));
+      await vscode.workspace.fs.writeFile(config, Buffer.from("export default { testDir: './tests', testMatch: 'companion-save.spec.ts' };\n"));
+      await api.discovery.refreshAll();
+      const target = api.discovery.currentTargets.find((target) => target.configFile === config.fsPath);
+      assert.ok(target);
+      const document = await vscode.workspace.openTextDocument(uri);
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(uri, new vscode.Range(1, 6, 1, 17), 'after save');
+      await vscode.workspace.applyEdit(edit);
+      assert.ok(document.isDirty);
+      api.runner.run = async (_target, request) => {
+        captured = request;
+        return { ...request, id: 'captured', startedAt: Date.now(), status: 'passed', durationMs: 1,
+          total: 1, passed: 1, failed: 0, flaky: 0, skipped: 0, failures: [] };
+      };
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runCompanion', {
+        kind: 'test', targetId: target.id, uri: uri.toString(), file: uri.fsPath,
+        position: { line: 1, character: 0 }, titlePath: ['after save'], documentVersion: document.version,
+      } satisfies EditorTestSelection);
+      assert.strictEqual(document.isDirty, false);
+      assert.ok(captured, `a verified companion request is dispatched: ${JSON.stringify({ text: document.getText(), diagnostic: api.discovery.diagnosticsFor(target.id, uri.fsPath), model: api.discovery.cachedModelForFile(target.id, uri.fsPath), revision: api.discovery.revisionFor(target.id) })}`);
+      assert.strictEqual(captured.targetId, target.id);
+      assert.strictEqual(captured.configFile, config.fsPath);
+      assert.deepStrictEqual(captured.initialTests?.map((test) => test.titlePath), [['after save']]);
+    } finally {
+      api.runner.run = originalRun;
+      await configuration.update('sidebar.autoFocus', previousFocus, vscode.ConfigurationTarget.Global);
+      await vscode.workspace.fs.delete(uri).then(undefined, () => undefined);
+      await vscode.workspace.fs.delete(config).then(undefined, () => undefined);
+      await api.discovery.refreshAll();
+    }
+  });
+
+  test('reruns surviving failures and never broadens an entirely removed batch', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'rerun-survivor.spec.ts');
+    const config = vscode.Uri.joinPath(fixture.uri, 'playwright.rerun-survivor.config.ts');
+    const missingUri = vscode.Uri.joinPath(fixture.uri, 'tests', 'deleted-failure.spec.ts');
+    const originalRun = api.runner.run;
+    const history = api.runner as unknown as { history: CompanionRunSummary[] };
+    const previousHistory = history.history;
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', uri);
+    const previousFocus = configuration.inspect<boolean>('sidebar.autoFocus')?.globalValue;
+    const captured: CompanionCliRunRequest[] = [];
+    try {
+      await configuration.update('sidebar.autoFocus', false, vscode.ConfigurationTarget.Global);
+      await vscode.workspace.fs.writeFile(uri, Buffer.from("import { test, expect } from '@playwright/test';\ntest('survivor', async () => { expect(1).toBe(1); });\ntest('renamed', async () => {});\n"));
+      await vscode.workspace.fs.writeFile(config, Buffer.from("export default { testDir: './tests', testMatch: 'rerun-survivor.spec.ts' };\n"));
+      await api.discovery.refreshAll();
+      await api.discovery.refreshSavedFiles([uri.fsPath]);
+      const target = api.discovery.currentTargets.find((target) => target.configFile === config.fsPath);
+      assert.ok(target);
+      const failures = [
+        { title: 'deleted', titlePath: ['deleted'], file: uri.fsPath, line: 4, column: 1 },
+        { title: 'old name', titlePath: ['old name'], file: uri.fsPath, line: 3, column: 1 },
+        { title: 'missing file', titlePath: ['missing file'], file: missingUri.fsPath, line: 1, column: 1 },
+        { title: 'survivor', titlePath: ['survivor'], file: uri.fsPath, line: 2, column: 1 },
+      ];
+      const summary: CompanionRunSummary = { id: 'rerun-regression', kind: 'companion-run',
+        targetId: target.id, cwd: target.cwd, configFile: target.configFile, startedAt: 1,
+        status: 'failed', durationMs: 1, total: 4, passed: 0, failed: 4, flaky: 0, skipped: 0,
+        failures, args: [], projects: [], selection: { files: [uri.fsPath], titleFilters: [] } };
+      history.history = [summary];
+      api.runner.run = async (_target, request) => {
+        captured.push(request);
+        return { ...summary, status: 'passed' };
+      };
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.rerunFailedCli', summary.id);
+      assert.strictEqual(captured.length, 1);
+      assert.deepStrictEqual(captured[0].initialTests?.map((test) => test.titlePath), [['survivor']]);
+      assert.deepStrictEqual(captured[0].selection.files, [uri.fsPath]);
+      assert.strictEqual(captured[0].selection.titleFilters.length, 1);
+      history.history = [{ ...summary, failures: failures.slice(0, 3) }];
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.rerunFailedCli', summary.id);
+      assert.strictEqual(captured.length, 1, 'an empty batch must not launch the original file scope');
+    } finally {
+      api.runner.run = originalRun;
+      history.history = previousHistory;
+      await configuration.update('sidebar.autoFocus', previousFocus, vscode.ConfigurationTarget.Global);
+      await vscode.workspace.fs.delete(uri).then(undefined, () => undefined);
+      await vscode.workspace.fs.delete(config).then(undefined, () => undefined);
+      await api.discovery.refreshAll();
+    }
   });
 
   test('provides file, suite, and test CodeLens actions', async () => {

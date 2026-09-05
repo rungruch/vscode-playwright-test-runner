@@ -32,6 +32,7 @@ export interface TargetDiscovery {
   target: RunTarget;
   model?: DiscoveredConfig;
   error?: string;
+  scopeFile?: string;
 }
 
 export interface DiscoveryDiagnostics {
@@ -60,6 +61,9 @@ export class DiscoveryService implements vscode.Disposable {
   private readonly output = vscode.window.createOutputChannel('Playwright CodeLens Runner');
   private readonly context: vscode.ExtensionContext;
   private targets: RunTarget[] = [];
+  private targetRefresh: Promise<RunTarget[]> | undefined;
+  private readonly projectMetadata = new Map<string, string[]>();
+  private readonly fileAccess = new Map<string, true>();
   private readonly cache = new Map<string, DiscoveredConfig>();
   private readonly fileCache = new Map<string, DiscoveredConfig>();
   /** Target-wide failures only: CLI resolution, version, or full discovery. */
@@ -79,9 +83,12 @@ export class DiscoveryService implements vscode.Disposable {
   private readonly targetCancellation = new Map<string, vscode.CancellationTokenSource>();
   private readonly retiredTargetIds = new Set<string>();
   private readonly limiter = new AsyncLimiter(4);
-  private readonly pendingRefreshes = new Map<string, { rescan: boolean; broad: boolean }>();
+  private readonly pendingRefreshes = new Map<string, { rescan: boolean; broad: boolean; targetIds: string[] }>();
+  private readonly refreshWaiters = new Set<() => void>();
+  private activeFileRefreshes = 0;
   private refreshTimer: NodeJS.Timeout | undefined;
-  private queuedFullRefresh: Promise<void> = Promise.resolve();
+  private fullRefreshRunning = false;
+  private fullRefreshPending = false;
   private targetRefreshSequence = 0;
   private disposed = false;
 
@@ -92,6 +99,11 @@ export class DiscoveryService implements vscode.Disposable {
     const configWatcher = vscode.workspace.createFileSystemWatcher(PLAYWRIGHT_CONFIG_GLOB);
     this.disposables.push(
       configWatcher,
+      vscode.workspace.onDidCloseTextDocument(() => {
+        for (const target of this.targets) {
+          this.trimFileCache(target.id);
+        }
+      }),
       configWatcher.onDidCreate((uri) => this.scheduleRefresh(uri.fsPath, true)),
       configWatcher.onDidChange((uri) => this.scheduleRefresh(uri.fsPath, true)),
       configWatcher.onDidDelete((uri) => this.scheduleRefresh(uri.fsPath, true)),
@@ -137,7 +149,31 @@ export class DiscoveryService implements vscode.Disposable {
   }
 
   cachedModelForFile(targetId: string, scopeFile: string): DiscoveredConfig | undefined {
-    return this.fileCache.get(discoveryKey(targetId, scopeFile));
+    const key = discoveryKey(targetId, scopeFile);
+    this.touchFile(key);
+    return this.fileCache.get(key);
+  }
+
+  knownProjects(targetId: string): string[] | undefined {
+    return this.projectMetadata.get(targetId);
+  }
+
+  versionFor(targetId: string): string | undefined {
+    return this.versions.get(targetId);
+  }
+
+  revisionFor(targetId: string): number {
+    return this.targetRevisions.get(targetId) ?? 0;
+  }
+
+  /** A provisional editor owner; this never runs the workspace CLI. */
+  async provisionalTargetForFile(file: string): Promise<RunTarget | undefined> {
+    const targets = this.targets.length > 0 ? this.targets : await this.refreshTargets();
+    const ordered = this.rankTargetsForPath(targets, file);
+    const stored = this.context.workspaceState.get<string>(configOwnerKey(file));
+    return ordered.find((target) => target.id === stored)
+      ?? ordered.find((target) => modelContainsFile(this.cachedModelForFile(target.id, file) ?? this.cache.get(target.id), path.normalize(file)))
+      ?? ordered[0];
   }
 
   diagnosticsFor(targetId: string, scopeFile?: string): DiscoveryDiagnostics | undefined {
@@ -170,7 +206,20 @@ export class DiscoveryService implements vscode.Disposable {
       : targetError;
   }
 
-  async refreshTargets(): Promise<RunTarget[]> {
+  refreshTargets(): Promise<RunTarget[]> {
+    if (this.targetRefresh) {
+      return this.targetRefresh;
+    }
+    const refresh = this.doRefreshTargets().finally(() => {
+      if (this.targetRefresh === refresh) {
+        this.targetRefresh = undefined;
+      }
+    });
+    this.targetRefresh = refresh;
+    return refresh;
+  }
+
+  private async doRefreshTargets(): Promise<RunTarget[]> {
     if (this.disposed) {
       return [];
     }
@@ -352,12 +401,45 @@ export class DiscoveryService implements vscode.Disposable {
   }
 
   private queueRefreshAll(): void {
-    this.queuedFullRefresh = this.queuedFullRefresh
-      .catch(() => undefined)
-      .then(() => this.disposed ? undefined : this.refreshAll())
-      .catch((error: unknown) => {
+    this.fullRefreshPending = true;
+    if (this.fullRefreshRunning) {
+      return;
+    }
+    this.fullRefreshRunning = true;
+    void (async () => {
+      try {
+        while (this.fullRefreshPending && !this.disposed) {
+          this.fullRefreshPending = false;
+          await this.refreshAll();
+        }
+      } catch (error) {
         this.output.appendLine(`Automatic discovery refresh failed: ${errorMessage(error)}`);
-      });
+      } finally {
+        this.fullRefreshRunning = false;
+      }
+    })();
+  }
+
+  /** Waits for save and watcher notifications to settle before verifying a run. */
+  refreshSavedFiles(files: string[]): Promise<void> {
+    if (this.disposed || files.length === 0) {
+      return Promise.resolve();
+    }
+    const settled = new Promise<void>((resolve) => this.refreshWaiters.add(resolve));
+    for (const file of files) {
+      this.scheduleRefresh(file);
+    }
+    return settled;
+  }
+
+  private resolveRefreshWaiters(): void {
+    if (!this.disposed && (this.refreshTimer || this.pendingRefreshes.size > 0 || this.activeFileRefreshes > 0)) {
+      return;
+    }
+    for (const resolve of this.refreshWaiters) {
+      resolve();
+    }
+    this.refreshWaiters.clear();
   }
 
   /** Drops cached data for the target containing the given file. */
@@ -365,11 +447,17 @@ export class DiscoveryService implements vscode.Disposable {
     if (this.disposed) {
       return;
     }
+    const affected = this.changedTargets([{ path: fsPath, rescan: rescanTargets, broad }]);
     const pending = this.pendingRefreshes.get(fsPath);
     this.pendingRefreshes.set(fsPath, {
       rescan: (pending?.rescan ?? false) || rescanTargets,
       broad: (pending?.broad ?? false) || broad,
+      targetIds: [...new Set([...(pending?.targetIds ?? []), ...affected.map((target) => target.id)])],
     });
+    for (const target of affected) {
+      this.invalidateTarget(target.id, false, rescanTargets);
+      this.emitter.fire({ target, scopeFile: rescanTargets ? undefined : fsPath });
+    }
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
     }
@@ -377,8 +465,14 @@ export class DiscoveryService implements vscode.Disposable {
       this.refreshTimer = undefined;
       const changes = [...this.pendingRefreshes].map(([path, flags]) => ({ path, ...flags }));
       this.pendingRefreshes.clear();
+      this.activeFileRefreshes++;
       void this.refreshForFiles(changes).catch((error: unknown) => {
-        this.output.appendLine(`File-triggered discovery refresh failed: ${errorMessage(error)}`);
+        if (!this.disposed) {
+          this.output.appendLine(`File-triggered discovery refresh failed: ${errorMessage(error)}`);
+        }
+      }).finally(() => {
+        this.activeFileRefreshes--;
+        this.resolveRefreshWaiters();
       });
     }, 300);
   }
@@ -441,7 +535,7 @@ export class DiscoveryService implements vscode.Disposable {
     }
   }
 
-  private async refreshForFiles(changes: { path: string; rescan: boolean; broad?: boolean }[]): Promise<void> {
+  private async refreshForFiles(changes: { path: string; rescan: boolean; broad?: boolean; targetIds?: string[] }[]): Promise<void> {
     if (this.disposed) {
       return;
     }
@@ -456,12 +550,35 @@ export class DiscoveryService implements vscode.Disposable {
       await this.refreshTargets();
       targets = this.changedTargets(changes);
     }
-    await Promise.all(targets.map((target) => this.discover(target, undefined, true)));
+    if (changes.every((change) => change.targetIds === undefined)) {
+      for (const target of targets) {
+        this.invalidateTarget(target.id, false, changes.some((change) => change.rescan));
+      }
+    }
+    await Promise.all(targets.map(async (target) => {
+      if (changes.some((change) => change.rescan && (change.targetIds?.includes(target.id) || change.path === target.configFile))) {
+        await this.discover(target);
+        return;
+      }
+      const files = new Set(changes.filter((change) => !change.rescan).map((change) => change.path));
+      for (const editor of vscode.window.visibleTextEditors) {
+        if (this.isTestDocument(editor.document) && containsPath(target.workspaceFolder.uri.fsPath, editor.document.uri.fsPath)) {
+          files.add(editor.document.uri.fsPath);
+        }
+      }
+      await Promise.all([...files].map((file) => this.discoverForFile(target, file)));
+    }));
   }
 
-  private changedTargets(changes: { path: string; rescan: boolean; broad?: boolean }[]): RunTarget[] {
+  private changedTargets(changes: { path: string; rescan: boolean; broad?: boolean; targetIds?: string[] }[]): RunTarget[] {
     const selected = new Map<string, RunTarget>();
     for (const change of changes) {
+      for (const id of change.targetIds ?? []) {
+        const target = this.targets.find((candidate) => candidate.id === id);
+        if (target) {
+          selected.set(id, target);
+        }
+      }
       if (change.broad) {
         for (const target of this.targets) {
           selected.set(target.id, target);
@@ -503,7 +620,7 @@ export class DiscoveryService implements vscode.Disposable {
     const inflight = scopeFile ? this.fileInflight : this.inflight;
     const key = discoveryKey(target.id, scopeFile);
     if (!force) {
-      const cached = cache.get(key);
+      const cached = scopeFile ? this.cachedModelForFile(target.id, scopeFile) : cache.get(key);
       if (cached) {
         return cached;
       }
@@ -521,7 +638,7 @@ export class DiscoveryService implements vscode.Disposable {
 
     const revision = this.targetRevisions.get(target.id) ?? 0;
     const cancellation = this.cancellationForTarget(target.id);
-    const task = this.limiter.run(() => this.doDiscover(target, scopeFile, revision, cancellation.token));
+    const task = this.limiter.run(() => this.doDiscover(target, scopeFile, revision, cancellation.token), Boolean(scopeFile), cancellation.token);
     const tracked = task.finally(() => {
       if (inflight.get(key) === tracked) {
         inflight.delete(key);
@@ -567,7 +684,7 @@ export class DiscoveryService implements vscode.Disposable {
           );
         this.cliErrors.set(target.id, message);
         this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, [], message);
-        this.emitter.fire({ target, error: message });
+        this.emitter.fire({ target, error: message, scopeFile });
         return undefined;
       }
       cliVersion = probe.output;
@@ -577,13 +694,13 @@ export class DiscoveryService implements vscode.Disposable {
         const message = this.sanitize(target, `Playwright Test >= 1.38 is required (detected: ${probe.output}).`);
         this.unsupported.set(target.id, message);
         this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, [], message);
-        this.emitter.fire({ target, error: message });
+        this.emitter.fire({ target, error: message, scopeFile });
         return undefined;
       }
     } else {
       const message = this.unsupported.get(target.id);
       this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, [], message);
-      this.emitter.fire({ target, error: message });
+      this.emitter.fire({ target, error: message, scopeFile });
       return undefined;
     }
 
@@ -612,7 +729,7 @@ export class DiscoveryService implements vscode.Disposable {
         this.errors.set(target.id, message);
       }
       this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, [], message);
-      this.emitter.fire({ target, error: message });
+      this.emitter.fire({ target, error: message, scopeFile });
       return undefined;
     }
     const model = parseDiscoveryOutput(stdout, {
@@ -630,10 +747,11 @@ export class DiscoveryService implements vscode.Disposable {
       // file. Cache that negative result instead of treating it as target
       // failure and re-running it on every CodeLens refresh.
       model.errors = [];
+      this.projectMetadata.set(target.id, model.projects);
       this.fileCache.set(key, model);
       this.fileErrors.delete(key);
       this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, model.projects, undefined);
-      this.emitter.fire({ target, model });
+      this.emitter.fire({ target, model, scopeFile });
       return model;
     }
     if (result.exitCode !== 0 && model.files.length === 0) {
@@ -644,9 +762,10 @@ export class DiscoveryService implements vscode.Disposable {
         this.errors.set(target.id, message);
       }
       this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, model.projects, message);
-      this.emitter.fire({ target, error: message });
+      this.emitter.fire({ target, error: message, scopeFile });
       return undefined;
     }
+    this.projectMetadata.set(target.id, model.projects);
     const modelErrors = model.errors.map((error) => this.sanitize(target, error));
     model.errors = modelErrors;
     const modelError = modelErrors.join('\n') || undefined;
@@ -658,7 +777,7 @@ export class DiscoveryService implements vscode.Disposable {
       updateError(this.errors, target.id, modelError);
     }
     this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, model.projects, modelError);
-    this.emitter.fire({ target, model, error: modelError });
+    this.emitter.fire({ target, model, error: modelError, scopeFile });
     return model;
   }
 
@@ -737,7 +856,7 @@ export class DiscoveryService implements vscode.Disposable {
     return source;
   }
 
-  private invalidateTarget(targetId: string, retire = false): void {
+  private invalidateTarget(targetId: string, retire = false, clearCli = true): void {
     if (retire) {
       this.retiredTargetIds.add(targetId);
     }
@@ -747,11 +866,19 @@ export class DiscoveryService implements vscode.Disposable {
     cancellation?.dispose();
     this.targetCancellation.delete(targetId);
 
+    for (const key of this.fileAccess.keys()) {
+      if (targetIdFromDiscoveryKey(key) === targetId) {
+        this.fileAccess.delete(key);
+      }
+    }
     this.cache.delete(targetId);
     this.errors.delete(targetId);
-    this.cliErrors.delete(targetId);
-    this.unsupported.delete(targetId);
-    this.versions.delete(targetId);
+    if (clearCli) {
+      this.cliErrors.delete(targetId);
+      this.unsupported.delete(targetId);
+      this.versions.delete(targetId);
+      this.projectMetadata.delete(targetId);
+    }
     this.versionInflight.delete(targetId);
     this.latestDiagnosticKeys.delete(targetId);
     this.inflight.delete(targetId);
@@ -780,6 +907,7 @@ export class DiscoveryService implements vscode.Disposable {
   private invalidateAllTargets(clearTargets: boolean): void {
     if (clearTargets) {
       this.targetRefreshSequence++;
+      this.targetRefresh = undefined;
     }
     const ids = new Set<string>([
       ...this.targets.map((target) => target.id),
@@ -818,6 +946,7 @@ export class DiscoveryService implements vscode.Disposable {
       this.refreshTimer = undefined;
     }
     this.pendingRefreshes.clear();
+    this.resolveRefreshWaiters();
     this.invalidateAllTargets(true);
     this.limiter.dispose();
     for (const disposable of this.testWatcherDisposables.splice(0)) {
@@ -859,6 +988,36 @@ export class DiscoveryService implements vscode.Disposable {
     this.diagnostics.set(key, diagnostic);
     this.latestDiagnosticKeys.set(target.id, key);
     this.appendDiagnostic(diagnostic);
+    if (scopeFile) {
+      this.touchFile(key);
+      this.trimFileCache(target.id);
+    }
+  }
+
+  private isTestDocument(document: vscode.TextDocument): boolean {
+    return document.uri.scheme === 'file' && vscode.languages.match(
+      { scheme: 'file', pattern: new Settings(document.uri).codeLensPattern }, document,
+    ) > 0;
+  }
+
+  private touchFile(key: string): void {
+    if (this.fileCache.has(key) || this.fileErrors.has(key) || this.diagnostics.has(key)) {
+      this.fileAccess.delete(key);
+      this.fileAccess.set(key, true);
+    }
+  }
+
+  private trimFileCache(targetId: string): void {
+    const open = new Set(vscode.workspace.textDocuments.map((document) => path.normalize(document.uri.fsPath)));
+    const inactive = [...this.fileAccess.keys()].filter((key) => (
+      targetIdFromDiscoveryKey(key) === targetId && !open.has(key.slice(key.indexOf('\0') + 1))
+    ));
+    for (const key of inactive.slice(0, Math.max(0, inactive.length - 128))) {
+      this.fileAccess.delete(key);
+      this.fileCache.delete(key);
+      this.fileErrors.delete(key);
+      this.diagnostics.delete(key);
+    }
   }
 
   private appendDiagnostic(diagnostic: DiscoveryDiagnostics): void {
@@ -911,8 +1070,18 @@ function targetIdFromDiscoveryKey(key: string): string {
   return separator === -1 ? key : key.slice(0, separator);
 }
 
+const modelFiles = new WeakMap<DiscoveredConfig, Set<string>>();
+
 function modelContainsFile(model: DiscoveredConfig | undefined, normalizedFile: string): boolean {
-  return Boolean(model?.files.some((file) => path.normalize(file.file) === normalizedFile));
+  if (!model) {
+    return false;
+  }
+  let files = modelFiles.get(model);
+  if (!files) {
+    files = new Set(model.files.map((file) => path.normalize(file.file)));
+    modelFiles.set(model, files);
+  }
+  return files.has(normalizedFile);
 }
 
 function updateError(map: Map<string, string>, key: string, error: string | undefined): void {
@@ -1037,6 +1206,8 @@ class AsyncLimiter {
   private active = 0;
   private readonly queue: Array<{
     task: () => Promise<unknown>;
+    priority: boolean;
+    cancellation?: vscode.Disposable;
     resolve: (value: unknown) => void;
     reject: (reason: unknown) => void;
   }> = [];
@@ -1044,26 +1215,38 @@ class AsyncLimiter {
 
   constructor(private readonly limit: number) {}
 
-  run<T>(task: () => Promise<T>): Promise<T | undefined> {
-    if (this.disposed) {
+  run<T>(task: () => Promise<T>, priority = false, token?: vscode.CancellationToken): Promise<T | undefined> {
+    if (this.disposed || token?.isCancellationRequested) {
       return Promise.resolve(undefined);
     }
     return new Promise<T | undefined>((resolve, reject) => {
-      this.queue.push({
+      const entry: (typeof this.queue)[number] = {
         task,
+        priority,
         resolve: (value) => resolve(value as T | undefined),
         reject,
+      };
+      entry.cancellation = token?.onCancellationRequested(() => {
+        const index = this.queue.indexOf(entry);
+        if (index >= 0) {
+          this.queue.splice(index, 1);
+          entry.cancellation?.dispose();
+          resolve(undefined);
+        }
       });
+      this.queue.push(entry);
       this.pump();
     });
   }
 
   private pump(): void {
     while (!this.disposed && this.active < this.limit && this.queue.length > 0) {
-      const entry = this.queue.shift();
+      const priorityIndex = this.queue.findIndex((entry) => entry.priority);
+      const [entry] = this.queue.splice(priorityIndex < 0 ? 0 : priorityIndex, 1);
       if (!entry) {
         return;
       }
+      entry.cancellation?.dispose();
       this.active++;
       void entry.task()
         .then(entry.resolve, entry.reject)
@@ -1077,6 +1260,7 @@ class AsyncLimiter {
   dispose(): void {
     this.disposed = true;
     for (const entry of this.queue.splice(0)) {
+      entry.cancellation?.dispose();
       entry.resolve(undefined);
     }
   }

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { parseTestFileAst } from './core/astParser';
+import { DiscoveredConfig } from './core/model';
 import { CompanionCliRunner } from './companionRunner';
 import { EditorTestSelection, editorSelectionsForFile } from './core/editorSelections';
 import { DiscoveryService } from './discoveryService';
@@ -18,17 +19,32 @@ const TEST_DOCUMENTS: vscode.DocumentSelector = [
  * Run and Debug can be delegated to Microsoft's Playwright extension,
  * or promoted to companion CLI runs with live execution status.
  */
-class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
+export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
   private readonly disposables: vscode.Disposable[] = [];
   readonly onDidChangeCodeLenses = this.emitter.event;
+  private readonly documents = new Map<string, {
+    version: number;
+    targetId: string;
+    staticModel?: DiscoveredConfig;
+    model?: DiscoveredConfig;
+    selections?: EditorTestSelection[];
+  }>();
+  private readonly ownership = new Map<string, Promise<RunTarget | undefined>>();
 
   constructor(
     private readonly discovery: DiscoveryService,
     private readonly runner?: CompanionCliRunner,
   ) {
     this.disposables.push(
-      this.discovery.onDidDiscover(() => this.emitter.fire()),
+      this.discovery.onDidDiscover((event) => {
+        if (!event.scopeFile || this.documents.has(vscode.Uri.file(event.scopeFile).toString())) {
+          this.emitter.fire();
+        }
+      }),
+      vscode.workspace.onDidCloseTextDocument((document) => {
+        this.documents.delete(document.uri.toString());
+      }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration(`${SETTINGS_NAMESPACE}.codeLens`)) {
           this.emitter.fire();
@@ -36,7 +52,11 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
       }),
     );
     if (this.runner) {
-      this.disposables.push(this.runner.onDidChange(() => this.emitter.fire()));
+      this.disposables.push(this.runner.onDidChangeTests((event) => {
+        if (!event.files || event.files.some((file) => this.documents.has(vscode.Uri.file(file).toString()))) {
+          this.emitter.fire();
+        }
+      }));
     }
   }
 
@@ -49,64 +69,51 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
       return [];
     }
 
-    const target = await this.targetForDocument(document.uri.fsPath, token);
-    if (!target || token.isCancellationRequested) {
+    const version = document.version;
+    const target = settings.codeLensFastStaticDiscovery
+      ? await this.discovery.provisionalTargetForFile(document.uri.fsPath)
+      : await this.discovery.resolveTargetForFile(document.uri.fsPath, { prompt: false, token });
+    if (!target || token.isCancellationRequested || document.version !== version) {
       return [];
     }
-
+    const uri = document.uri.toString();
+    let cached = this.documents.get(uri);
+    if (!cached || cached.version !== version || cached.targetId !== target.id) {
+      cached = { version, targetId: target.id };
+      this.documents.set(uri, cached);
+    }
     let model = this.discovery.cachedModelForFile(target.id, document.uri.fsPath)
       ?? this.discovery.cachedModel(target.id);
-
-    if (!model && settings.codeLensFastStaticDiscovery) {
-      // Tier-1: Instant static AST discovery (<3ms). Renders immediately without layout shift!
-      model = parseTestFileAst(document.getText(), document.uri.fsPath, {
+    let source: 'ast' | 'cli' = 'cli';
+    if (settings.codeLensFastStaticDiscovery && (document.isDirty || !model)) {
+      cached.staticModel ??= parseTestFileAst(document.getText(), document.uri.fsPath, {
         targetId: target.id,
         rootDir: target.configDir,
       });
-      // Trigger background CLI discovery to enrich projects / dynamic cases
-      void this.discovery.discoverForFile(target, document.uri.fsPath).then(() => {
-        this.emitter.fire();
-      }).catch(() => undefined);
+      model = cached.staticModel;
+      source = 'ast';
     } else if (!model) {
       model = await this.discovery.discoverForFile(target, document.uri.fsPath, token);
     }
-
-    if (!model || token.isCancellationRequested) {
-      const error = this.discovery.errorFor(target.id, document.uri.fsPath);
-      if (error) {
-        const selection = fileSelection(target, document.uri.toString(), document.uri.fsPath);
-        const range = rangeFor(selection);
-        return [
-          new vscode.CodeLens(range, {
-            title: '$(warning) Discovery failed',
-            command: 'playwrightCodeLensRunner.showDiscoveryDetails',
-            arguments: [selection],
-          }),
-          new vscode.CodeLens(range, {
-            title: 'Details',
-            command: 'playwrightCodeLensRunner.showDiscoveryDetails',
-            arguments: [selection],
-          }),
-          new vscode.CodeLens(range, {
-            title: 'Retry',
-            command: 'playwrightCodeLensRunner.retryDiscovery',
-            arguments: [selection],
-          }),
-          new vscode.CodeLens(range, {
-            title: 'Choose CLI Config…',
-            command: 'playwrightCodeLensRunner.selectConfig',
-            arguments: [selection],
-          }),
-        ];
-      }
+    if (token.isCancellationRequested || document.version !== version) {
       return [];
     }
-
-    // Full discovery supplies project metadata in the background while the
-    // file-scoped result keeps this editor responsive in large workspaces.
-    void this.discovery.discover(target).catch(() => undefined);
-
-    const selections = editorSelectionsForFile(model, document.uri.fsPath, document.uri.toString());
+    if (settings.codeLensFastStaticDiscovery && !this.ownership.has(uri)) {
+      const task = this.discovery.resolveTargetForFile(document.uri.fsPath, { prompt: false }).catch(() => undefined);
+      this.ownership.set(uri, task);
+      void task.finally(() => {
+        if (this.ownership.get(uri) === task) {
+          this.ownership.delete(uri);
+        }
+      });
+    }
+    if (cached.model !== model) {
+      cached.model = model;
+      cached.selections = model ? editorSelectionsForFile(model, document.uri.fsPath, uri).map((selection) => ({
+        ...selection, discoverySource: source, documentVersion: version,
+      })) : [];
+    }
+    const selections = cached.selections ?? [];
     const lenses: vscode.CodeLens[] = [];
     for (const selection of selections) {
       const range = rangeFor(selection);
@@ -115,17 +122,25 @@ class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disp
       }
       addActions(lenses, range, selection, settings.codeLensActions(selection.kind), target, settings.codeLensDensity);
     }
+    if (this.discovery.errorFor(target.id, document.uri.fsPath)) {
+      const selection = fileSelection(target, uri, document.uri.fsPath);
+      for (const [title, command] of [
+        ['$(warning) Discovery failed', 'showDiscoveryDetails'],
+        ['Details', 'showDiscoveryDetails'], ['Retry', 'retryDiscovery'], ['Choose CLI Config…', 'selectConfig'],
+      ]) {
+        lenses.push(new vscode.CodeLens(rangeFor(selection), {
+          title, command: `playwrightCodeLensRunner.${command}`, arguments: [selection],
+        }));
+      }
+    }
     return lenses;
-  }
-
-  private async targetForDocument(fsPath: string, token: vscode.CancellationToken): Promise<RunTarget | undefined> {
-    return this.discovery.resolveTargetForFile(fsPath, { prompt: false, token });
   }
 
   dispose(): void {
     for (const disposable of this.disposables) {
       disposable.dispose();
     }
+    this.documents.clear();
     this.emitter.dispose();
   }
 }
@@ -140,7 +155,7 @@ function addTestStatusLens(
   if (!runner) {
     return;
   }
-  const statusInfo = runner.testStatusFor(selection.file, selection.position.line, selection.titlePath);
+  const statusInfo = runner.testStatusFor(selection.file, selection.position.line, selection.titlePath, selection.targetId, selection.position.character + 1, selection.titlePaths);
   if (!statusInfo) {
     return;
   }

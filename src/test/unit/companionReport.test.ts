@@ -176,6 +176,16 @@ suite('lookupTestRunStatus', () => {
     assert.deepStrictEqual(status, { status: 'running' });
   });
 
+  test('does not use another suite short title or another declaration column', () => {
+    const summary: CompanionRunSummary = { ...finishedSummary, failures: [], tests: [
+      { id: 'a', file: '/ws/test.spec.ts', line: 5, column: 1, title: 'A › duplicate', titlePath: ['A', 'duplicate'], status: 'passed' },
+      { id: 'b', file: '/ws/test.spec.ts', line: 12, column: 1, title: 'B › duplicate', titlePath: ['B', 'duplicate'], status: 'failed' },
+    ] };
+    assert.strictEqual(lookupTestRunStatus(summary, false, '/ws/test.spec.ts', 11, ['B', 'duplicate'], 1)?.status, 'failed');
+    assert.strictEqual(lookupTestRunStatus(summary, false, '/ws/test.spec.ts', 4, ['B', 'duplicate'], 1), undefined);
+    assert.strictEqual(lookupTestRunStatus(summary, false, '/ws/test.spec.ts', 4, ['A', 'duplicate'], 20), undefined);
+  });
+
   test('returns undefined when no matching test is executing in active run', () => {
     const status = lookupTestRunStatus(runningSummary, true, '/ws/tests/auth.spec.ts', 20, ['authentication', 'other']);
     assert.strictEqual(status, undefined);

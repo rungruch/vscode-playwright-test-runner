@@ -14,7 +14,7 @@ interface CalleeInfo {
 
 /**
  * Fast in-memory AST parser for Playwright test files using `@babel/parser`.
- * Extracts test and suite locations in 1-3ms without spawning child processes.
+ * Extracts test and suite locations without spawning child processes.
  */
 export function parseTestFileAst(
   code: string,
@@ -71,7 +71,9 @@ export function parseTestFileAst(
 
     if (isCallExpression(node)) {
       const calleeInfo = resolveCallee(node.callee);
-      if (calleeInfo) {
+      const callback = node.arguments.at(-1) as { type?: string } | undefined;
+      if (calleeInfo && node.arguments.length >= 2 && callback
+        && ['ArrowFunctionExpression', 'FunctionExpression', 'Identifier'].includes(callback.type ?? '')) {
         const title = extractTitle(node.arguments[0]);
         const tags = extractTags(node.arguments);
         const line = node.loc?.start.line ?? 1;
@@ -122,10 +124,7 @@ export function parseTestFileAst(
             fileEntry.tests.push(test);
           }
 
-          // Traverse into test callback (may contain helper calls or dynamic nested tests)
-          for (const arg of node.arguments) {
-            walk(arg);
-          }
+          // Runtime annotations and helper calls inside test bodies are not declarations.
           return;
         }
       }
@@ -206,7 +205,7 @@ function resolveCallee(callee: unknown): CalleeInfo | undefined {
   }
 
   // Tests: test(...), it(...), test.only(...), test.skip(...), etc.
-  if (root === 'test' || root === 'it') {
+  if ((root === 'test' || root === 'it') && parts.slice(1).every((part) => ['only', 'skip', 'fixme', 'fail'].includes(part))) {
     const isSkipped = parts.includes('skip') || parts.includes('fixme');
     return { kind: 'test', skipped: isSkipped };
   }
@@ -304,8 +303,8 @@ function scanFallback(
   normalizedFile: string,
 ): void {
   const lines = code.split(/\r?\n/);
-  const suiteRegex = /(?:test\.describe|describe)(?:\.(?:only|skip|serial|parallel))?\s*\(\s*(['"`])(.*?)\1/g;
-  const testRegex = /(?:test|it)(?:\.(?:only|skip|fixme|fail))?\s*\(\s*(['"`])(.*?)\1/g;
+  const suiteRegex = /^\s*(?:test\.describe|describe)(?:\.(?:only|skip|serial|parallel))?\s*\(\s*(['"`])(.*?)\1/g;
+  const testRegex = /^\s*(?:test|it)(?:\.(?:only|skip|fixme|fail))?\s*\(\s*(['"`])(.*?)\1/g;
 
   for (let i = 0; i < lines.length; i++) {
     const lineText = lines[i];
@@ -318,7 +317,7 @@ function scanFallback(
       fileEntry.suites.push({
         id: `${targetId}:suite:${fileEntry.relativeFile}:${title}:${lineNumber}`,
         title,
-        location: { file: normalizedFile, line: lineNumber, column: match.index + 1 },
+        location: { file: normalizedFile, line: lineNumber, column: match.index + match[0].search(/\S/) + 1 },
         suites: [],
         tests: [],
       });
@@ -333,7 +332,7 @@ function scanFallback(
         id: `${targetId}:spec:${normalizedFile}:${lineNumber}:${title}`,
         title,
         fullTitle: title,
-        location: { file: normalizedFile, line: lineNumber, column: match.index + 1 },
+        location: { file: normalizedFile, line: lineNumber, column: match.index + match[0].search(/\S/) + 1 },
         projects: [],
         tags,
         skipped,

@@ -1,4 +1,6 @@
 import * as path from 'path';
+import { legacyTitle, SourceTestIndex } from './testIdentity';
+import { terminalTestStatus } from './testOutcome';
 import { CompanionFailure, CompanionRunSummary, CompanionTestItem, CompanionTestStatus } from './companionTypes';
 
 interface JsonResultError {
@@ -131,8 +133,9 @@ export function withParsedReport(
 
   // Aggregate multiple projects/repetitions of the same source test.
   const aggregatedParsed: CompanionTestItem[] = [];
+  const aggregates = new SourceTestIndex<CompanionTestItem>((test) => test, run.cwd);
   for (const parsedTest of parsedTests) {
-    let aggregate = aggregatedParsed.find((test) => isSameTest(test, parsedTest));
+    let aggregate = aggregates.find(parsedTest);
     if (!aggregate) {
       aggregate = {
         ...parsedTest,
@@ -147,6 +150,7 @@ export function withParsedReport(
         flakyRuns: 0,
       };
       aggregatedParsed.push(aggregate);
+      aggregates.add(aggregate);
     }
 
     aggregate.totalRuns = (aggregate.totalRuns ?? 0) + 1;
@@ -172,9 +176,11 @@ export function withParsedReport(
   }
 
   const mergedTests = run.tests ? run.tests.map((t) => ({ ...t })) : [];
+  const mergeIndex = new SourceTestIndex<{ test: CompanionTestItem; index: number }>((entry) => entry.test, run.cwd);
+  mergedTests.forEach((test, index) => mergeIndex.add({ test, index }));
   if (aggregatedParsed.length > 0) {
     for (const aggTest of aggregatedParsed) {
-      const idx = mergedTests.findIndex((t) => isSameTest(t, aggTest));
+      const idx = mergeIndex.find(aggTest)?.index ?? -1;
       if (idx >= 0) {
         const existing = mergedTests[idx];
         mergedTests[idx] = {
@@ -232,51 +238,8 @@ function aggregateStatus(test: CompanionTestItem): CompanionTestStatus {
   return (test.skippedRuns ?? 0) > 0 ? 'skipped' : 'pending';
 }
 
-function stripTags(title: string): string {
-  return title
-    .replace(/(?:\s*\(retry\s*#\d+\))$/gi, '')
-    .replace(/(?:\s+@\S+)+$/g, '')
-    .trim();
-}
-
-function stripFilePrefix(title: string): string {
-  const parts = title.split(' › ');
-  if (parts.length > 1) {
-    const first = parts[0];
-    if (/\.(?:spec|test)\.[cm]?[jt]sx?$/i.test(first) || first.endsWith('.ts') || first.endsWith('.js') || first.includes('/') || first.includes('\\')) {
-      return parts.slice(1).join(' › ');
-    }
-  }
-  return title;
-}
-
-function isSameTest(a: CompanionTestItem, b: CompanionTestItem): boolean {
-  if (a.file && b.file) {
-    if (path.normalize(a.file) !== path.normalize(b.file)) {
-      return false;
-    }
-    if (a.line !== undefined && b.line !== undefined && a.line !== b.line) {
-      return false;
-    }
-  }
-  return isTitleMatch(a.title, b.title);
-}
-
 export function isTitleMatch(a: string, b: string): boolean {
-  if (a === b) {
-    return true;
-  }
-  const cleanA = stripTags(a);
-  const cleanB = stripTags(b);
-  if (cleanA === cleanB) {
-    return true;
-  }
-  const strippedA = stripTags(stripFilePrefix(cleanA));
-  const strippedB = stripTags(stripFilePrefix(cleanB));
-  if (strippedA === strippedB) {
-    return true;
-  }
-  return false;
+  return a === b || legacyTitle(a) === legacyTitle(b);
 }
 
 function visitSuite(
@@ -318,32 +281,22 @@ function visitSpec(
     const final = results[results.length - 1];
     const statuses = results.map((result) => result.status ?? 'unknown');
     const recovered = final.status === 'passed' && statuses.slice(0, -1).some((status) => isFailure(status));
-    const isFlaky = test.status === 'flaky' || recovered;
+    const testStatus = terminalTestStatus(test.status, final.status, recovered);
+    const isFlaky = testStatus === 'flaky';
     if (isFlaky) {
       summary.flaky++;
     }
     const testTitle = titlePath.join(' › ') || 'Unnamed Playwright test';
-    const isExpected = test.status === 'expected';
-    const isUnexpected = test.status === 'unexpected';
-    const testStatus: CompanionTestStatus = isFlaky
-      ? 'flaky'
-      : test.status === 'skipped' || final.status === 'skipped'
-        ? 'skipped'
-        : isExpected
-          ? 'passed'
-          : isUnexpected
-            ? 'failed'
-            : final.status === 'passed'
-              ? 'passed'
-              : 'failed';
     const diagnosticResult = isFlaky
       ? results.find((result) => isFailure(result.status ?? 'unknown')) ?? final
       : final;
     summary.tests.push({
-      id: `${file ?? ''}:${line ?? 1}:${testTitle}${test.projectName ? `:${test.projectName}` : ''}`,
+      id: JSON.stringify([file, line, spec.column, sourceTitlePath(titlePath, file), test.projectName]),
       title: testTitle,
+      titlePath: sourceTitlePath(titlePath, file),
       file,
       line,
+      column: spec.column,
       status: testStatus,
       durationMs: totalDuration,
       message: testStatus === 'failed' || testStatus === 'flaky' ? errorMessage(diagnosticResult) : undefined,
@@ -357,13 +310,21 @@ function visitSpec(
       summary.failed++;
       summary.failures.push({
         title: testTitle,
-        titlePath,
+        titlePath: sourceTitlePath(titlePath, file),
         file,
         line,
+        column: spec.column,
         message: errorMessage(final),
       });
     }
   }
+}
+
+function sourceTitlePath(titles: string[], file?: string): string[] {
+  if (file && titles.length > 1 && (titles[0] === file || titles[0] === path.basename(file))) {
+    return titles.slice(1);
+  }
+  return titles;
 }
 
 function isFailure(status: string): boolean {
@@ -405,77 +366,60 @@ export interface TestRunStatus {
 /**
  * Fast in-memory lookup matching a test file and line/title against the latest companion run.
  */
+const statusIndexes = new WeakMap<CompanionRunSummary, {
+  tests: SourceTestIndex<CompanionTestItem>;
+  failures: SourceTestIndex<CompanionFailure>;
+}>();
+
 export function lookupTestRunStatus(
   summary: CompanionRunSummary | undefined,
   hasActiveRun: boolean,
   file: string,
   line: number,
   titlePath?: string[],
+  column?: number,
+  titlePaths?: string[][],
 ): TestRunStatus | undefined {
-  if (!summary) {
+  if (!summary || (summary.status === 'running' && !hasActiveRun)) {
     return undefined;
   }
-  const normalizedFile = path.normalize(file);
-  const testItem = summary.tests?.find((test) => (
-    (!test.file || path.normalize(test.file) === normalizedFile)
-    && (test.line === line + 1 || isTitlePathMatch(test.title, titlePath))
-  ));
-
-  // Persisted running summaries are stale after extension reload. Live runs can
-  // safely expose both active and already-completed status from reporter events.
-  if (summary.status === 'running') {
-    if (!hasActiveRun) {
-      return undefined;
+  let indexes = statusIndexes.get(summary);
+  if (!indexes) {
+    indexes = {
+      tests: new SourceTestIndex((test: CompanionTestItem) => test, summary.cwd),
+      failures: new SourceTestIndex((failure: CompanionFailure) => failure, summary.cwd),
+    };
+    for (const test of summary.tests ?? []) {
+      indexes.tests.add(test);
     }
-    if (testItem?.status === 'running') {
+    for (const failure of summary.failures) {
+      indexes.failures.add(failure);
+    }
+    statusIndexes.set(summary, indexes);
+  }
+  const query = { file, line: line + 1, column, titlePath, title: titlePath?.join(' › ') ?? '' };
+  const exact = indexes.tests.find(query);
+  const candidates = titlePaths && titlePaths.length > 1
+    ? titlePaths.flatMap((titles) => {
+      const test = indexes.tests.find({ ...query, titlePath: titles, title: titles.join(' › ') });
+      return test ? [test] : [];
+    })
+    : exact ? [exact] : titlePath ? [] : indexes.tests.atLocation(query);
+  const locationFailures = indexes.failures.atLocation(query);
+  const failure = indexes.failures.find(query)
+    ?? (exact && locationFailures.length === 1 && !locationFailures[0].titlePath ? locationFailures[0] : undefined);
+  if (candidates.length > 0) {
+    const statuses = candidates.map((test) => test.status);
+    if (statuses.includes('running') && hasActiveRun) {
       return { status: 'running' };
     }
-    if (!testItem && summary.currentTest && isTitlePathMatch(summary.currentTest, titlePath)) {
-      return { status: 'running' };
+    const status = statuses.includes('flaky') || (statuses.includes('passed') && statuses.includes('failed'))
+      ? 'flaky' : statuses.includes('failed') ? 'failed' : statuses.every((status) => status === 'passed') ? 'passed' : undefined;
+    if (status) {
+      const durationMs = candidates.every((test) => test.durationMs === undefined)
+        ? undefined : candidates.reduce((sum, test) => sum + (test.durationMs ?? 0), 0);
+      return status === 'failed' ? { status, durationMs, failure } : { status, durationMs };
     }
   }
-
-  // Check the exact test status, including tests completed while other workers run.
-  if (testItem) {
-    if (testItem.status === 'flaky') {
-      return { status: 'flaky', durationMs: testItem.durationMs };
-    }
-    if (testItem.status === 'failed') {
-      const failure = summary.failures.find((f) => (
-        (!f.file || path.normalize(f.file) === normalizedFile)
-        && (f.line === line + 1 || isTitlePathMatch(f.title, titlePath) || isArrayMatch(f.titlePath, titlePath))
-      ));
-      return { status: 'failed', durationMs: testItem.durationMs, failure };
-    }
-    if (testItem.status === 'passed') {
-      return { status: 'passed', durationMs: testItem.durationMs };
-    }
-  }
-
-  // Fallback: check failures
-  const failure = summary.failures.find((f) => (
-    (!f.file || path.normalize(f.file) === normalizedFile)
-    && (f.line === line + 1 || isTitlePathMatch(f.title, titlePath) || isArrayMatch(f.titlePath, titlePath))
-  ));
-  if (failure) {
-    return { status: 'failed', failure };
-  }
-
-  return undefined;
-}
-
-function isTitlePathMatch(title: string, titlePath?: string[]): boolean {
-  if (!titlePath || titlePath.length === 0) {
-    return false;
-  }
-  const joined = titlePath.join(' › ');
-  const last = titlePath[titlePath.length - 1];
-  return title === joined || title === last || title.endsWith(` › ${last}`) || isTitleMatch(title, joined);
-}
-
-function isArrayMatch(a?: string[], b?: string[]): boolean {
-  if (!a || !b || a.length !== b.length) {
-    return false;
-  }
-  return a.every((val, i) => val === b[i]);
+  return failure ? { status: 'failed', failure } : undefined;
 }

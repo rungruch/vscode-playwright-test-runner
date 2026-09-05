@@ -18,6 +18,8 @@ import {
   UiArgumentOptions,
 } from './core/runArguments';
 import { cliSelectionForEditor } from './core/selectionArguments';
+import { prepareSelection } from './core/selectionPreparation';
+import { legacyTitle } from './core/testIdentity';
 import { environmentForCli } from './core/cliResolution';
 import { quoteForTerminal } from './core/terminalQuote';
 import { supportsFailOnFlakyTests } from './core/version';
@@ -71,7 +73,7 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.flakeLab', (selection?: EditorTestSelection | vscode.Uri) => flakeLabCommand(deps, selection));
   register('playwrightCodeLensRunner.flakeLabWithSize', (selection?: EditorTestSelection | vscode.Uri) => flakeLabWithSizeCommand(deps, selection));
   register('playwrightCodeLensRunner.runCompanion', (selection?: EditorTestSelection | vscode.Uri) => companionRunCommand(deps, selection));
-  register('playwrightCodeLensRunner.cancelCompanionRun', () => cancelCompanionRunCommand(deps));
+  register('playwrightCodeLensRunner.cancelCompanionRun', (arg?: unknown) => cancelCompanionRunCommand(deps, arg));
   register('playwrightCodeLensRunner.clearRuns', () => clearRunsCommand(deps));
   register('playwrightCodeLensRunner.runSingleCompanionTest', (arg?: unknown) => runSingleCompanionTestCommand(deps, arg));
   register('playwrightCodeLensRunner.flakeSingleCompanionTest', (arg?: unknown) => flakeSingleCompanionTestCommand(deps, arg));
@@ -79,7 +81,7 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.openLastFailedUi', (selection?: EditorTestSelection) => lastFailedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.tagActions', (selection?: EditorTestSelection) => tagActionsCommand(deps, selection));
   register('playwrightCodeLensRunner.openRunsView', () => focusCompanionView());
-  register('playwrightCodeLensRunner.rerunFailedCli', () => rerunFailedCommand(deps));
+  register('playwrightCodeLensRunner.rerunFailedCli', (arg?: unknown) => rerunFailedCommand(deps, arg));
   register('playwrightCodeLensRunner.openArtifactCenter', () => artifactCenterCommand(deps));
   register('playwrightCodeLensRunner.openLatestReport', () => openLatestReportCommand(deps));
   register('playwrightCodeLensRunner.openLatestTrace', () => openLatestTraceCommand(deps));
@@ -137,7 +139,7 @@ async function interactiveCliCommand(
   arg: EditorTestSelection | vscode.Uri | undefined,
   mode: 'debug' | 'ui',
 ): Promise<void> {
-  const selection = isEditorSelection(arg)
+  let selection = isEditorSelection(arg)
     ? arg
     : isUri(arg)
       ? await fileSelectionForUri(deps, arg)
@@ -147,18 +149,18 @@ async function interactiveCliCommand(
     return;
   }
 
-  const target = await targetForSelection(deps, selection);
-  if (!target) {
+  const prepared = await prepareCompanionSelection(deps, selection);
+  if (!prepared) {
     return;
   }
+  const { target } = prepared;
+  selection = prepared.selection;
   let projects = await deps.projects.getProjects(target);
   let browser: ForcedBrowser | undefined;
   if (mode === 'debug') {
     const preference = new Settings(vscode.Uri.file(selection.file)).inspectorBrowser;
-    const model = preference === 'config'
-      ? deps.discovery.cachedModel(target.id)
-      : deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
-    const resolved = resolveBrowserPreference(preference, projects, model?.projects);
+    const knownProjects = deps.discovery.knownProjects(target.id);
+    const resolved = resolveBrowserPreference(preference, projects, knownProjects);
     if (resolved.error) {
       void vscode.window.showErrorMessage(
         `${resolved.error} Choose "config" in playwrightCodeLensRunner.inspector.browser or add the matching project.`,
@@ -187,6 +189,9 @@ async function interactiveCliCommand(
   const sessionKey = mode === 'ui'
     ? `ui:${target.id}:${profile?.name ?? 'local'}`
     : `inspector:${target.id}`;
+  if (!selectionStillCurrent(deps, target, selection)) {
+    return;
+  }
   deps.sessions.launch(target, sessionKey, `${label}: ${path.basename(selection.file)}`, args);
   await focusCompanionFor(target);
 }
@@ -353,7 +358,7 @@ async function flakeLabCommand(
   arg: EditorTestSelection | vscode.Uri | undefined,
   options?: FlakeLabCommandOptions,
 ): Promise<void> {
-  const selection = isEditorSelection(arg)
+  let selection = isEditorSelection(arg)
     ? arg
     : isUri(arg)
       ? await fileSelectionForUri(deps, arg)
@@ -362,13 +367,16 @@ async function flakeLabCommand(
     void vscode.window.showInformationMessage('Open a Playwright test file first.');
     return;
   }
-  const target = await targetForSelection(deps, selection);
-  if (!target) {
+  const prepared = await prepareCompanionSelection(deps, selection);
+  if (!prepared) {
     return;
   }
+  const { target } = prepared;
+  selection = prepared.selection;
   const settings = settingsFor(target);
   if (settings.flakeLabFailOnFlakyTests) {
-    const version = await probeCliVersion(target.cli, target.cwd, target.env);
+    const cachedVersion = deps.discovery.versionFor(target.id);
+    const version = cachedVersion ? { output: cachedVersion, ok: true } : await probeCliVersion(target.cli, target.cwd, target.env);
     if (!version.ok || !supportsFailOnFlakyTests(version.output)) {
       void vscode.window.showErrorMessage(
         'Flake Lab needs Playwright Test 1.52 or newer when failOnFlakyTests is enabled. Disable playwrightCodeLensRunner.flakeLab.failOnFlakyTests to run the compatible subset.',
@@ -379,8 +387,7 @@ async function flakeLabCommand(
   let projects = await deps.projects.getProjects(target);
   let browser: ForcedBrowser | undefined;
   if (settings.flakeLabBrowser !== 'config') {
-    const model = deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
-    const resolved = resolveBrowserPreference(settings.flakeLabBrowser, projects, model?.projects);
+    const resolved = resolveBrowserPreference(settings.flakeLabBrowser, projects, deps.discovery.knownProjects(target.id));
     if (resolved.error) {
       void vscode.window.showErrorMessage(
         `${resolved.error} Choose "config" in playwrightCodeLensRunner.flakeLab.browser or add the matching project.`,
@@ -418,6 +425,9 @@ async function flakeLabCommand(
     trace: settings.flakeLabTrace,
     failOnFlakyTests: settings.flakeLabFailOnFlakyTests,
   });
+  if (!selectionStillCurrent(deps, target, selection)) {
+    return;
+  }
   await dispatchManagedRun({
     runsEnabled: settings.sidebarRunsEnabled,
     runInTerminal: () => runInTerminal(target, `Playwright Flake Lab: ${path.basename(selection.file)}`, args),
@@ -481,8 +491,19 @@ async function flakeLabWithSizeCommand(
   await flakeLabCommand(deps, selection, { size: picked.size, repeatEach });
 }
 
-function cancelCompanionRunCommand(deps: CommandDeps): void {
-  deps.runner.cancel();
+function runIdFromArg(arg: unknown): string | undefined {
+  if (typeof arg === 'string') {
+    return arg;
+  }
+  if (arg && typeof arg === 'object' && 'run' in arg && arg.run && typeof arg.run === 'object'
+    && 'id' in arg.run && typeof arg.run.id === 'string') {
+    return arg.run.id;
+  }
+  return undefined;
+}
+
+function cancelCompanionRunCommand(deps: CommandDeps, arg?: unknown): void {
+  deps.runner.cancel(runIdFromArg(arg));
 }
 
 async function clearRunsCommand(deps: CommandDeps): Promise<void> {
@@ -513,12 +534,13 @@ function testSelectionFromTreeArg(arg: unknown): EditorTestSelection | undefined
     if (test?.file) {
       return {
         kind: 'test',
-        targetId: '',
+        targetId: 'targetId' in arg && typeof arg.targetId === 'string' ? arg.targetId : '',
         uri: vscode.Uri.file(test.file).toString(),
         file: test.file,
         fullTitle: test.title,
-        position: { line: Math.max(0, (test.line ?? 1) - 1), character: 0 },
-        titlePaths: [test.title.split(' › ')],
+        position: { line: Math.max(0, (test.line ?? 1) - 1), character: Math.max(0, (test.column ?? 1) - 1) },
+        titlePath: test.titlePath ?? test.title.split(' › '),
+        titlePaths: [test.titlePath ?? test.title.split(' › ')],
       };
     }
   }
@@ -529,7 +551,7 @@ async function companionRunCommand(
   deps: CommandDeps,
   arg: EditorTestSelection | vscode.Uri | undefined,
 ): Promise<void> {
-  const selection = isEditorSelection(arg)
+  let selection = isEditorSelection(arg)
     ? arg
     : isUri(arg)
       ? await fileSelectionForUri(deps, arg)
@@ -538,16 +560,17 @@ async function companionRunCommand(
     void vscode.window.showInformationMessage('Open a Playwright test file first.');
     return;
   }
-  const target = await targetForSelection(deps, selection);
-  if (!target) {
+  const prepared = await prepareCompanionSelection(deps, selection);
+  if (!prepared) {
     return;
   }
+  const { target } = prepared;
+  selection = prepared.selection;
   const settings = settingsFor(target);
   let projects = await deps.projects.getProjects(target);
   let browser: ForcedBrowser | undefined;
   if (settings.companionBrowser !== 'config') {
-    const model = deps.discovery.cachedModel(target.id) ?? await deps.discovery.discover(target);
-    const resolved = resolveBrowserPreference(settings.companionBrowser, projects, model?.projects);
+    const resolved = resolveBrowserPreference(settings.companionBrowser, projects, deps.discovery.knownProjects(target.id));
     if (resolved.error) {
       void vscode.window.showErrorMessage(
         `${resolved.error} Choose "config" in playwrightCodeLensRunner.companion.browser or add the matching project.`,
@@ -568,6 +591,9 @@ async function companionRunCommand(
     ...target.runOptions,
   ];
   const initialTests = await initialTestsForSelection(deps, target, selection);
+  if (!selectionStillCurrent(deps, target, selection)) {
+    return;
+  }
   await dispatchManagedRun({
     runsEnabled: settingsFor(target).sidebarRunsEnabled,
     runInTerminal: () => runInTerminal(target, `Playwright Companion Run: ${path.basename(selection.file)}`, args),
@@ -710,8 +736,9 @@ async function openUiProfileCommand(deps: CommandDeps, selection: EditorTestSele
   await focusCompanionFor(scope.target);
 }
 
-async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
-  const latest = deps.runner.latestRun;
+async function rerunFailedCommand(deps: CommandDeps, arg?: unknown): Promise<void> {
+  const id = runIdFromArg(arg);
+  const latest = id ? deps.runner.runs.find((run) => run.id === id) : deps.runner.latestRun;
   if (!latest || latest.failures.length === 0) {
     void vscode.window.showInformationMessage('No failed companion CLI tests are available to rerun.');
     return;
@@ -721,7 +748,71 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     void vscode.window.showErrorMessage('The Playwright config for the last companion run is no longer available.');
     return;
   }
-  const selection = failedSelection(latest);
+  const selectedFiles = failedSelection(latest).files;
+  const savedFiles: string[] = [];
+  for (const file of selectedFiles) {
+    const document = vscode.workspace.textDocuments.find((document) => document.uri.fsPath === file);
+    if (document?.isDirty) {
+      if (!(await document.save())) {
+        void vscode.window.showInformationMessage('Save the selected failed test files before rerunning.');
+        return;
+      }
+      savedFiles.push(file);
+    }
+  }
+  await deps.discovery.refreshSavedFiles(savedFiles);
+  const verifiedFailures: CompanionFailure[] = [];
+  const preparedSelections: EditorTestSelection[] = [];
+  let missing = 0;
+  const unique = new Map(latest.failures.map((failure) => [JSON.stringify([failure.file, failure.line, failure.column, failure.titlePath ?? failure.title]), failure]));
+  for (const failure of unique.values()) {
+    if (!failure.file) {
+      verifiedFailures.push(failure);
+      continue;
+    }
+    try {
+      await vscode.workspace.fs.stat(vscode.Uri.file(failure.file));
+    } catch (error) {
+      if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+        missing++;
+        continue;
+      }
+      void vscode.window.showErrorMessage(`Could not read failed test file: ${String(error)}`);
+      return;
+    }
+    const titlePath = failure.titlePath ?? legacyTitle(failure.title).split(' › ');
+    const requested: EditorTestSelection = {
+      kind: 'test', targetId: target.id, file: failure.file, uri: vscode.Uri.file(failure.file).toString(),
+      position: { line: Math.max(0, (failure.line ?? 1) - 1), character: Math.max(0, (failure.column ?? 1) - 1) },
+      titlePath, titlePaths: [titlePath],
+    };
+    const prepared = await prepareSelection(requested, {
+      openDocument: () => vscode.workspace.openTextDocument(vscode.Uri.parse(requested.uri)),
+      afterSave: () => deps.discovery.refreshSavedFiles([requested.file]),
+      resolveTarget: async () => target,
+      discover: (target) => deps.discovery.discoverForFile(target, requested.file),
+      revision: (target) => deps.discovery.revisionFor(target.id),
+    });
+    if (prepared.error !== undefined) {
+      if (prepared.reason === 'missing') {
+        missing++;
+        continue;
+      }
+      void vscode.window.showInformationMessage(prepared.error);
+      return;
+    }
+    preparedSelections.push(prepared.selection);
+    verifiedFailures.push({ ...failure, titlePath: prepared.selection.titlePath,
+      line: prepared.selection.position.line + 1, column: prepared.selection.position.character + 1 });
+  }
+  if (verifiedFailures.length === 0) {
+    void vscode.window.showInformationMessage('No previously failed tests remain available to rerun.');
+    return;
+  }
+  if (missing > 0) {
+    void vscode.window.showInformationMessage(`Skipped ${missing} previously failed test(s) whose file or declaration is no longer available.`);
+  }
+  const selection = failedSelection({ ...latest, failures: verifiedFailures });
   const projects = latest.projects.length > 0 ? latest.projects : await deps.projects.getProjects(target);
   const args = [
     ...buildCompanionTestArguments(selection, {
@@ -731,13 +822,18 @@ async function rerunFailedCommand(deps: CommandDeps): Promise<void> {
     }),
     ...target.runOptions,
   ];
-  const initialTests = latest.failures.map((f) => ({
+  const initialTests = verifiedFailures.map((f) => ({
     id: `${f.file ?? ''}:${f.line ?? 1}:${f.title}`,
     title: f.title,
     file: f.file,
     line: f.line,
+    column: f.column,
+    titlePath: f.titlePath,
     status: 'pending' as const,
   }));
+  if (preparedSelections.some((selection) => !selectionStillCurrent(deps, target, selection))) {
+    return;
+  }
   await dispatchManagedRun({
     runsEnabled: settingsFor(target).sidebarRunsEnabled,
     runInTerminal: () => runInTerminal(target, 'Playwright Rerun Failed', args),
@@ -1113,7 +1209,7 @@ async function selectionAtCursor(deps: CommandDeps): Promise<EditorTestSelection
   if (!target) {
     return undefined;
   }
-  const model = await deps.discovery.discover(target);
+  const model = await deps.discovery.discoverForFile(target, editor.document.uri.fsPath);
   if (!model) {
     return undefined;
   }
@@ -1141,7 +1237,7 @@ async function fileSelectionForUri(deps: CommandDeps, uri: vscode.Uri): Promise<
   if (!target) {
     return undefined;
   }
-  const model = await deps.discovery.discover(target);
+  const model = await deps.discovery.discoverForFile(target, uri.fsPath);
   const discovered = model
     ? editorSelectionsForFile(model, uri.fsPath, uri.toString()).find((selection) => selection.kind === 'file')
     : undefined;
@@ -1152,6 +1248,36 @@ async function fileSelectionForUri(deps: CommandDeps, uri: vscode.Uri): Promise<
     file: uri.fsPath,
     position: { line: 0, character: 0 },
   };
+}
+
+async function prepareCompanionSelection(
+  deps: CommandDeps,
+  requested: EditorTestSelection,
+): Promise<{ target: RunTarget; selection: EditorTestSelection } | undefined> {
+  const result = await prepareSelection(requested, {
+    openDocument: () => vscode.workspace.openTextDocument(vscode.Uri.parse(requested.uri)),
+    afterSave: () => deps.discovery.refreshSavedFiles([requested.file]),
+    resolveTarget: () => requested.discoverySource !== 'ast' && requested.targetId
+      ? targetById(deps, requested.targetId)
+      : deps.discovery.resolveTargetForFile(requested.file, { prompt: false }),
+    discover: (target) => deps.discovery.discoverForFile(target, requested.file),
+    revision: (target) => deps.discovery.revisionFor(target.id),
+  });
+  if (result.error !== undefined) {
+    void vscode.window.showInformationMessage(result.error);
+    return undefined;
+  }
+  return result;
+}
+
+function selectionStillCurrent(deps: CommandDeps, target: RunTarget, selection: EditorTestSelection): boolean {
+  const document = vscode.workspace.textDocuments.find((document) => document.uri.toString() === selection.uri);
+  const current = document && !document.isDirty && document.version === selection.documentVersion
+    && deps.discovery.revisionFor(target.id) === selection.discoveryRevision;
+  if (!current) {
+    void vscode.window.showInformationMessage('The test or its configuration changed while preparing the run. Choose the action again.');
+  }
+  return Boolean(current);
 }
 
 async function targetForSelection(deps: CommandDeps, selection: EditorTestSelection): Promise<RunTarget | undefined> {
@@ -1257,18 +1383,24 @@ async function initialTestsForSelection(
     const matched = selection.kind === 'file'
       ? selections
       : selections.filter((s) => isSelectionMatch(s, selection));
-    const targetTests = matched.length > 0 ? matched : selections;
-    return targetTests.map((s) => {
-      const title = s.titlePath ? s.titlePath.join(' › ') : s.fullTitle ?? 'Playwright test';
-      const line = s.position.line + 1;
-      return {
-        id: `${s.file}:${line}:${title}`,
-        title,
-        file: s.file,
-        line,
-        status: 'pending' as const,
-      };
-    });
+    const targetTests = matched;
+    return targetTests.flatMap((selection) => (selection.titlePaths ?? [selection.titlePath ?? []])
+      .map((titlePath) => ({ ...selection, titlePath })))
+      .filter((candidate) => selection.kind !== 'test' || selection.titlePaths?.length !== 1
+        || JSON.stringify(candidate.titlePath) === JSON.stringify(selection.titlePaths[0]))
+      .map((s) => {
+        const title = s.titlePath.length > 0 ? s.titlePath.join(' › ') : s.fullTitle ?? 'Playwright test';
+        const line = s.position.line + 1;
+        return {
+          id: JSON.stringify([s.file, line, s.position.character + 1, s.titlePath]),
+          title,
+          file: s.file,
+          line,
+          column: s.position.character + 1,
+          titlePath: s.titlePath,
+          status: 'pending' as const,
+        };
+      });
   } catch {
     return undefined;
   }
@@ -1280,7 +1412,7 @@ function isSelectionMatch(candidate: EditorTestSelection, target: EditorTestSele
   }
   if (target.kind === 'test') {
     return candidate.position.line === target.position.line
-      || Boolean(candidate.titlePath && target.titlePath && candidate.titlePath.join(' › ') === target.titlePath.join(' › '));
+      && candidate.position.character === target.position.character;
   }
   if (target.kind === 'suite' && candidate.titlePath && target.titlePath) {
     return target.titlePath.every((seg, i) => candidate.titlePath?.[i] === seg);

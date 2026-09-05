@@ -17,7 +17,7 @@ interface ReporterSuite {
 interface ReporterTestCase {
   id: string;
   title: string;
-  location?: { file?: string; line?: number };
+  location?: { file?: string; line?: number; column?: number };
   parent: { project(): ReporterProject | undefined };
   repeatEachIndex?: number;
   retries: number;
@@ -100,6 +100,8 @@ function reporterTest(test: ReporterTestCase): CompanionReporterTest {
   const titleParts = titlePath.length >= 4 ? titlePath.slice(3) : [test.title];
   return {
     id: test.id,
+    titlePath: titleParts,
+    column: test.location?.column,
     title: titleParts.join(' › ') || test.title,
     file: test.location?.file,
     line: test.location?.line,

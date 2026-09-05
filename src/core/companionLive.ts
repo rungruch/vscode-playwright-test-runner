@@ -1,5 +1,6 @@
 import * as path from 'path';
-import { isTitleMatch } from './companionReport';
+import { SourceTestIndex } from './testIdentity';
+import { terminalTestStatus } from './testOutcome';
 import { CompanionFailure, CompanionRunSummary, CompanionTestItem, CompanionTestStatus } from './companionTypes';
 
 export const COMPANION_REPORTER_EVENT_PREFIX = '\u001ePLAYWRIGHT_CODELENS_EVENT:';
@@ -11,6 +12,8 @@ export interface CompanionReporterTest {
   title: string;
   file?: string;
   line?: number;
+  column?: number;
+  titlePath?: string[];
   project?: string;
   repeatEachIndex?: number;
   retries?: number;
@@ -118,14 +121,19 @@ interface LogicalTestState {
   plannedIds: Set<string>;
   activeAttempts: Set<string>;
   terminalResults: Map<string, TerminalResult>;
-  retryFailures: Set<string>;
+  retryFailures: Map<string, TerminalResult>;
   durationMs: number;
   projects: Set<string>;
+  counts: Record<TerminalResult['kind'], number>;
+  failureResults: Map<string, TerminalResult>;
+  cached?: CompanionTestItem;
 }
 
 /** Reduces exact Playwright reporter lifecycle events into the persisted sidebar model. */
 export class CompanionLiveRunTracker {
-  private readonly initialTests: CompanionTestItem[];
+  private readonly initialIndex: SourceTestIndex<CompanionTestItem>;
+  private sourceIndex: SourceTestIndex<LogicalTestState>;
+  private dirty = false;
   private states: LogicalTestState[] = [];
   private readonly stateByTestId = new Map<string, LogicalTestState>();
   private readonly activeAttemptState = new Map<string, LogicalTestState>();
@@ -134,11 +142,19 @@ export class CompanionLiveRunTracker {
   private lastStartedTitle: string | undefined;
 
   constructor(private readonly cwd: string, initialTests: readonly CompanionTestItem[] = []) {
-    this.initialTests = initialTests.map((test) => ({ ...test }));
-    this.states = this.initialTests.map((test) => createLogicalState(test));
+    this.initialIndex = new SourceTestIndex((test) => test, cwd);
+    initialTests.forEach((test) => this.initialIndex.add(test));
+    this.states = initialTests.map((test) => createLogicalState(test));
+    this.sourceIndex = new SourceTestIndex((state) => state.item, cwd);
+    this.states.forEach((state) => this.sourceIndex.add(state));
   }
 
   apply(run: CompanionRunSummary, events: readonly CompanionReporterEvent[], durationMs: number): CompanionRunSummary {
+    this.ingest(events);
+    return this.snapshot(run, durationMs);
+  }
+
+  ingest(events: readonly CompanionReporterEvent[]): boolean {
     let changed = false;
     for (const event of events) {
       if (event.type === 'plan') {
@@ -150,41 +166,61 @@ export class CompanionLiveRunTracker {
         changed = this.applyTestEnd(event) || changed;
       }
     }
-    return changed ? this.materialize(run, durationMs) : run;
+    this.dirty ||= changed;
+    return changed;
+  }
+
+  snapshot(run: CompanionRunSummary, durationMs: number): CompanionRunSummary {
+    if (!this.dirty) {
+      return run;
+    }
+    this.dirty = false;
+    return this.materialize(run, durationMs);
   }
 
   finish(run: CompanionRunSummary, cancelled: boolean, durationMs: number): CompanionRunSummary {
     this.activeAttemptState.clear();
     for (const state of this.states) {
+      state.cached = undefined;
       state.activeAttempts.clear();
-      // Once the process exits, no pending retry can still start. Recovered
-      // retries already have a terminal flaky result, so this only prevents an
-      // unfinished attempt from remaining visually "running" forever.
-      state.retryFailures.clear();
-      if (cancelled) {
+      if (cancelled || state.retryFailures.size > 0) {
         for (const [testId, result] of state.terminalResults) {
           if (result.rawStatus === 'interrupted') {
             state.terminalResults.delete(testId);
+            state.counts[result.kind]--;
+            state.failureResults.delete(testId);
           }
         }
       }
+      // A stopped process cannot recover its last failed attempt with a retry.
+      for (const [testId, result] of state.retryFailures) {
+        if (!state.terminalResults.has(testId)) {
+          state.terminalResults.set(testId, result);
+          state.counts[result.kind]++;
+          state.failureResults.set(testId, result);
+        }
+      }
+      state.retryFailures.clear();
     }
+    this.dirty = false;
     return this.materialize(run, durationMs);
   }
 
   private applyPlan(event: CompanionReporterPlanEvent): void {
     this.plannedTotal = event.total;
     this.states = [];
+    this.sourceIndex = new SourceTestIndex((state) => state.item, this.cwd);
     this.stateByTestId.clear();
     this.activeAttemptState.clear();
     this.endedAttempts.clear();
 
     for (const test of event.tests) {
-      let state = this.states.find((candidate) => isSameLiveTest(candidate.item, test, this.cwd));
+      let state = this.sourceIndex.find(test);
       if (!state) {
-        const initial = this.initialTests.find((candidate) => isSameLiveTest(candidate, test, this.cwd));
-        state = createLogicalState(initial ?? testItemFromReporter(test, this.cwd));
+        const initial = this.initialIndex.find(test);
+        state = createLogicalState({ ...initial, ...testItemFromReporter(test, this.cwd), id: initial?.id ?? test.id });
         this.states.push(state);
+        this.sourceIndex.add(state);
       }
       state.plannedIds.add(test.id);
       if (test.project) {
@@ -200,6 +236,7 @@ export class CompanionLiveRunTracker {
       return false;
     }
     const state = this.stateFor(event.test);
+    state.cached = undefined;
     state.activeAttempts.add(attemptId);
     this.activeAttemptState.set(attemptId, state);
     this.lastStartedTitle = state.item.title;
@@ -212,25 +249,36 @@ export class CompanionLiveRunTracker {
       return false;
     }
     const state = this.activeAttemptState.get(attemptId) ?? this.stateFor(event.test);
+    state.cached = undefined;
     state.activeAttempts.delete(attemptId);
     this.activeAttemptState.delete(attemptId);
     this.endedAttempts.add(attemptId);
     state.durationMs += Math.max(0, event.durationMs);
 
     if (event.willRetry) {
-      state.retryFailures.add(event.test.id);
+      if (event.status !== 'interrupted') {
+        state.retryFailures.set(event.test.id, terminalResult(event, false));
+      }
       return true;
     }
 
     if (!state.terminalResults.has(event.test.id)) {
-      state.terminalResults.set(event.test.id, terminalResult(event, state.retryFailures.has(event.test.id)));
+      const result = terminalResult(event, state.retryFailures.has(event.test.id));
+      state.terminalResults.set(event.test.id, result);
+      state.counts[result.kind]++;
+      if (result.kind === 'failed' || result.kind === 'flaky') {
+        state.failureResults.set(event.test.id, result);
+      }
+    }
+    if (event.status !== 'interrupted') {
+      state.retryFailures.delete(event.test.id);
     }
     return true;
   }
 
   private stateFor(test: CompanionReporterTest): LogicalTestState {
     const existing = this.stateByTestId.get(test.id)
-      ?? this.states.find((candidate) => isSameLiveTest(candidate.item, test, this.cwd));
+      ?? this.sourceIndex.find(test);
     if (existing) {
       existing.plannedIds.add(test.id);
       if (test.project) {
@@ -246,6 +294,7 @@ export class CompanionLiveRunTracker {
       created.projects.add(test.project);
     }
     this.states.push(created);
+    this.sourceIndex.add(created);
     this.stateByTestId.set(test.id, created);
     return created;
   }
@@ -261,12 +310,14 @@ export class CompanionLiveRunTracker {
     const flaky = tests.filter((test) => isFlakyAggregate(test)).length;
     const failures: CompanionFailure[] = [];
     for (const state of this.states) {
-      for (const result of state.terminalResults.values()) {
+      for (const result of state.failureResults.values()) {
         if (result.kind === 'failed') {
           failures.push({
             title: state.item.title,
             file: state.item.file,
             line: state.item.line,
+            column: state.item.column,
+            titlePath: state.item.titlePath,
             message: result.message,
           });
         }
@@ -326,7 +377,11 @@ function parseReporterEvent(payload: string, runId: string): CompanionReporterEv
 }
 
 function isReporterTest(value: unknown): value is CompanionReporterTest {
-  return isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string';
+  return isRecord(value) && typeof value.id === 'string' && typeof value.title === 'string'
+    && (value.file === undefined || typeof value.file === 'string')
+    && (value.line === undefined || typeof value.line === 'number')
+    && (value.column === undefined || typeof value.column === 'number')
+    && (value.titlePath === undefined || (Array.isArray(value.titlePath) && value.titlePath.every((part) => typeof part === 'string')));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -349,9 +404,11 @@ function createLogicalState(item: CompanionTestItem): LogicalTestState {
     plannedIds: new Set<string>(),
     activeAttempts: new Set<string>(),
     terminalResults: new Map<string, TerminalResult>(),
-    retryFailures: new Set<string>(),
+    retryFailures: new Map<string, TerminalResult>(),
     durationMs: 0,
     projects: new Set<string>(),
+    counts: { passed: 0, failed: 0, skipped: 0, flaky: 0 },
+    failureResults: new Map(),
   };
 }
 
@@ -361,23 +418,11 @@ function testItemFromReporter(test: CompanionReporterTest, cwd: string): Compani
     title: test.title,
     file: normalizedReporterFile(test.file, cwd),
     line: test.line,
+    column: test.column,
+    titlePath: test.titlePath,
     project: test.project,
     status: 'pending',
   };
-}
-
-function isSameLiveTest(item: CompanionTestItem, test: CompanionReporterTest, cwd: string): boolean {
-  const itemFile = normalizedReporterFile(item.file, cwd);
-  const testFile = normalizedReporterFile(test.file, cwd);
-  if (itemFile && testFile) {
-    if (itemFile !== testFile) {
-      return false;
-    }
-    if (item.line !== undefined && test.line !== undefined && item.line !== test.line) {
-      return false;
-    }
-  }
-  return isTitleMatch(item.title, test.title);
 }
 
 function normalizedReporterFile(file: string | undefined, cwd: string): string | undefined {
@@ -392,16 +437,7 @@ function liveAttemptId(testId: string, retry: number, workerIndex: number): stri
 }
 
 function terminalResult(event: CompanionReporterTestEndEvent, recovered: boolean): TerminalResult {
-  let kind: TerminalResult['kind'];
-  if (event.status === 'skipped' || event.outcome === 'skipped') {
-    kind = 'skipped';
-  } else if (event.outcome === 'flaky' || recovered) {
-    kind = 'flaky';
-  } else if (event.outcome === 'expected' || event.status === 'passed') {
-    kind = 'passed';
-  } else {
-    kind = 'failed';
-  }
+  const kind = terminalTestStatus(event.outcome, event.status, recovered) as TerminalResult['kind'];
   return {
     kind,
     rawStatus: event.status,
@@ -411,24 +447,26 @@ function terminalResult(event: CompanionReporterTestEndEvent, recovered: boolean
 }
 
 function materializeTest(state: LogicalTestState): CompanionTestItem {
-  const results = [...state.terminalResults.values()];
-  const totalRuns = Math.max(state.plannedIds.size, results.length, state.activeAttempts.size, 1);
-  const completedRuns = results.length;
+  if (state.cached) {
+    return state.cached;
+  }
+  const completedRuns = state.terminalResults.size;
+  const totalRuns = Math.max(state.plannedIds.size, completedRuns, state.activeAttempts.size, 1);
   const activeRuns = state.activeAttempts.size;
-  const passedRuns = results.filter((result) => result.kind === 'passed' || result.kind === 'flaky').length;
-  const failedRuns = results.filter((result) => result.kind === 'failed').length;
-  const skippedRuns = results.filter((result) => result.kind === 'skipped').length;
-  const flakyRuns = results.filter((result) => result.kind === 'flaky').length;
+  const passedRuns = state.counts.passed + state.counts.flaky;
+  const failedRuns = state.counts.failed;
+  const skippedRuns = state.counts.skipped;
+  const flakyRuns = state.counts.flaky;
   const aggregate = aggregateStatus(passedRuns, failedRuns, skippedRuns, flakyRuns);
-  const retryPending = [...state.retryFailures].some((testId) => !state.terminalResults.has(testId));
+  const retryPending = state.retryFailures.size > 0;
   const status: CompanionTestStatus = activeRuns > 0 || retryPending
     ? 'running'
     : completedRuns < totalRuns
       ? 'pending'
       : aggregate;
-  const failure = results.find((result) => result.kind === 'failed' || result.kind === 'flaky');
+  const failure = state.failureResults.values().next().value;
 
-  return {
+  state.cached = {
     ...state.item,
     project: state.projects.size === 1
       ? [...state.projects][0]
@@ -446,6 +484,7 @@ function materializeTest(state: LogicalTestState): CompanionTestItem {
     durationMs: state.durationMs,
     message: failure?.message,
   };
+  return state.cached;
 }
 
 function aggregateStatus(

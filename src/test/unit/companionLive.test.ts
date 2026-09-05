@@ -15,6 +15,36 @@ import { CompanionRunSummary } from '../../core/companionTypes';
 const RUN_ID = 'live-run';
 
 suite('companion live reporter events', () => {
+  test('keeps an exhausted retry failed and classifies unexpected passes as failed', () => {
+    const testCase = { ...reporterTest('exhausted', 8), retries: 1 };
+    const tracker = new CompanionLiveRunTracker('/workspace');
+    let summary = tracker.apply(runSummary(1), [planEvent([testCase]), beginEvent(testCase, 0)], 1);
+    summary = tracker.apply(summary, [endEvent(testCase, 'failed', 'unexpected', 0, true)], 2);
+    summary = tracker.apply(summary, [beginEvent(testCase, 1, 1), endEvent(testCase, 'failed', 'unexpected', 1, false, 1)], 3);
+    assert.strictEqual(summary.failed, 1);
+    assert.strictEqual(summary.passed, 0);
+    assert.strictEqual(summary.flaky, 0);
+    assert.strictEqual(summary.tests?.[0].status, 'failed');
+
+    const unexpected = new CompanionLiveRunTracker('/workspace').apply(runSummary(1), [
+      planEvent([testCase]), endEvent(testCase, 'passed', 'unexpected'),
+    ], 1);
+    assert.strictEqual(unexpected.failed, 1);
+  });
+
+  test('ingests every event without materializing until the next snapshot', () => {
+    const testCase = reporterTest('batched', 1);
+    const tracker = new CompanionLiveRunTracker('/workspace');
+    const initial = runSummary(1);
+    tracker.ingest([planEvent([testCase]), beginEvent(testCase, 0)]);
+    tracker.ingest([endEvent(testCase, 'passed', 'expected')]);
+    assert.strictEqual(initial.passed, 0);
+    const snapshot = tracker.snapshot(initial, 10);
+    assert.strictEqual(snapshot.passed, 1);
+    assert.strictEqual(snapshot.activeTests, 0);
+    assert.strictEqual(tracker.snapshot(snapshot, 20), snapshot);
+  });
+
   test('decodes partial and multiple frames while preserving ordinary output', () => {
     const decoder = new CompanionReporterEventDecoder(RUN_ID);
     const testCase = reporterTest('test-1', 1);
@@ -165,6 +195,28 @@ suite('companion live reporter events', () => {
     assert.strictEqual(summary.flaky, 1);
     assert.strictEqual(summary.tests?.[0].status, 'flaky');
     assert.strictEqual(summary.tests?.[0].flakyRuns, 1);
+  });
+
+  test('preserves the last failure when cancellation or a crash stops retries', () => {
+    for (const cancelled of [true, false]) {
+      for (const interrupted of [true, false]) {
+        const testCase = { ...reporterTest('retry', 1), retries: 1 };
+        const tracker = new CompanionLiveRunTracker('/workspace');
+        let summary = tracker.apply(runSummary(1), [planEvent([testCase]),
+          { ...endEvent(testCase, 'failed', 'unexpected', 0, true), error: 'original assertion' },
+        ], 10);
+        if (interrupted) {
+          summary = tracker.apply(summary, [beginEvent(testCase, 0, 1),
+            endEvent(testCase, 'interrupted', 'unexpected', 0, false, 1)], 20);
+        }
+        summary = tracker.finish(summary, cancelled, 30);
+        assert.strictEqual(summary.tests?.[0].status, 'failed');
+        assert.strictEqual(summary.failed, 1);
+        assert.strictEqual(summary.completedTests, 1);
+        assert.strictEqual(summary.activeTests, 0);
+        assert.strictEqual(summary.failures[0]?.message, 'original assertion');
+      }
+    }
   });
 
   test('keeps completed results but clears interrupted work on cancellation', () => {

@@ -1,6 +1,14 @@
 # Change Log
 
-## Unreleased
+## 4.0.0 - 2026-09-05
+
+- Rerun remaining failures when earlier failures were deleted or renamed, without widening an empty rerun to the original scope.
+- Preserve failed attempts when cancellation or process termination stops retries, and verify unambiguous generated declarations when CLI columns are missing.
+- Render cached source CodeLens actions before CLI discovery completes; verify saved selections before companion execution and preserve generated-case scope.
+- Refresh changed/visible files while retaining CLI versions, coalesce target scans, prioritize file discovery, reject obsolete work, and bound inactive file caches.
+- Index test identities and report reconciliation, preserve structured title boundaries, and correct exhausted retries and unexpected passes.
+- Batch live updates at 100 ms with immediate final results, stable sidebar identities, run-specific cancellation/reruns, and serialized concurrent-run history.
+- Preserve Unicode reporter text across output chunks and add a repeatable core performance benchmark.
 
 - Replace line-output status inference with structured Playwright lifecycle events for managed Companion and Flake Lab runs.
 - Track every concurrent worker accurately, update completed results immediately, and show exact completed/running counts without prematurely marking active tests as passed.

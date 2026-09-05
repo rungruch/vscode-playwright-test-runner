@@ -10,7 +10,7 @@ import { RunTarget } from './runTarget';
 type RunElement =
   | { type: 'run'; run: CompanionRunSummary; isLatest?: boolean }
   | { type: 'historyGroup'; runs: readonly CompanionRunSummary[] }
-  | { type: 'testCase'; test: CompanionTestItem }
+  | { type: 'testCase'; test: CompanionTestItem; runId: string; targetId: string }
   | { type: 'failure'; failure: CompanionFailure }
   | { type: 'session'; session: InteractiveSession }
   | { type: 'reportSession'; session: ReportSession }
@@ -21,6 +21,8 @@ export class PlaywrightSidebar implements vscode.Disposable {
   private readonly runEmitter = new vscode.EventEmitter<RunElement | undefined>();
   private readonly artifactEmitter = new vscode.EventEmitter<ArtifactRecord | undefined>();
   private readonly disposables: vscode.Disposable[];
+  private runIds = '';
+  private readonly runElements = new Map<string, Extract<RunElement, { type: 'run' }>>();
 
   constructor(
     context: vscode.ExtensionContext,
@@ -42,7 +44,24 @@ export class PlaywrightSidebar implements vscode.Disposable {
         getTreeItem: (element) => this.artifactTreeItem(element),
         getChildren: () => [...this.artifacts.artifacts],
       }),
-      this.runner.onDidChange(() => this.runEmitter.fire(undefined)),
+      this.runner.onDidChange((summary) => {
+        const element = summary ? this.runElements.get(summary.id) : undefined;
+        const ids = new Set(this.runner.runs.map((run) => run.id));
+        const runIds = JSON.stringify([...ids]);
+        const structural = !summary || !element || runIds !== this.runIds;
+        this.runIds = runIds;
+        if (element && summary) {
+          element.run = summary;
+        }
+        if (structural) {
+          for (const id of this.runElements.keys()) {
+            if (!ids.has(id)) {
+              this.runElements.delete(id);
+            }
+          }
+        }
+        this.runEmitter.fire(structural ? undefined : element);
+      }),
       this.sessions.onDidChange(() => this.runEmitter.fire(undefined)),
       this.reportSession.onDidChange(() => {
         this.runEmitter.fire(undefined);
@@ -93,7 +112,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
       const latest = runs[0];
       const previousRuns = runs.slice(1);
       const items: RunElement[] = [
-        { type: 'run', run: latest, isLatest: true },
+        this.runElement(latest, true),
       ];
       if (previousRuns.length > 0) {
         items.push({ type: 'historyGroup', runs: previousRuns });
@@ -109,7 +128,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
       return items;
     }
     if (element.type === 'historyGroup') {
-      return element.runs.map((run) => ({ type: 'run' as const, run, isLatest: false }));
+      return this.runner.runs.slice(1).map((run) => this.runElement(run, false));
     }
     if (element.type === 'run') {
       const run = element.run;
@@ -171,19 +190,30 @@ export class PlaywrightSidebar implements vscode.Disposable {
         icon: 'output',
       });
       if (run.tests && run.tests.length > 0) {
-        totals.push(...run.tests.map((test) => ({ type: 'testCase' as const, test })));
+        totals.push(...run.tests.map((test) => ({ type: 'testCase' as const, test, runId: run.id, targetId: run.targetId })));
       } else if (run.failures.length > 0) {
         totals.push(...run.failures.map((failure) => ({ type: 'failure' as const, failure })));
       }
       if (run.failed > 0) {
-        totals.push({ type: 'action', label: 'Rerun Failed', command: 'playwrightCodeLensRunner.rerunFailedCli', icon: 'refresh' });
+        totals.push({ type: 'action', label: 'Rerun Failed', command: 'playwrightCodeLensRunner.rerunFailedCli', icon: 'refresh', args: [run.id] });
       }
       if (run.status === 'running') {
-        totals.push({ type: 'action', label: 'Cancel Run', command: 'playwrightCodeLensRunner.cancelCompanionRun', icon: 'stop' });
+        totals.push({ type: 'action', label: 'Cancel Run', command: 'playwrightCodeLensRunner.cancelCompanionRun', icon: 'stop', args: [run.id] });
       }
       return totals;
     }
     return [];
+  }
+
+  private runElement(run: CompanionRunSummary, isLatest: boolean): Extract<RunElement, { type: 'run' }> {
+    let element = this.runElements.get(run.id);
+    if (!element) {
+      element = { type: 'run', run, isLatest };
+      this.runElements.set(run.id, element);
+    }
+    element.run = run;
+    element.isLatest = isLatest;
+    return element;
   }
 
   private runTreeItem(element: RunElement): vscode.TreeItem {
@@ -207,6 +237,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
         isExpanded ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed,
       );
 
+      item.id = `run:${run.id}`;
       if (run.status === 'running') {
         const completed = completedRunCount(run);
         const active = activeRunCount(run);
@@ -272,6 +303,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
     if (element.type === 'testCase') {
       const test = element.test;
       const item = new vscode.TreeItem(test.title, vscode.TreeItemCollapsibleState.None);
+      item.id = JSON.stringify([element.runId, test.id]);
       const totalRuns = test.totalRuns ?? 1;
       const completedRuns = completedTestCount(test);
       const activeRuns = test.activeRuns ?? (test.status === 'running' ? 1 : 0);

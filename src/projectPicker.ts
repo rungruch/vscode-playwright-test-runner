@@ -62,9 +62,9 @@ export class ProjectPicker {
   }
 
   private async knownProjects(target: RunTarget): Promise<string[] | undefined> {
-    const cached = this.discovery.cachedModel(target.id);
-    if (cached) {
-      return cached.projects;
+    const projects = this.discovery.knownProjects(target.id);
+    if (projects) {
+      return projects;
     }
     const model = await this.discovery.discover(target);
     return model?.projects;
