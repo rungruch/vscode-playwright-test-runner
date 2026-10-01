@@ -230,6 +230,10 @@ npm run package
 npm run vsix
 ```
 
+### GitHub releases
+
+Push a `v`-prefixed tag matching the `package.json` version (for example, `v4.0.0`). The release workflow runs the test suite, builds the VSIX, and attaches it to a GitHub Release with generated release notes.
+
 The core benchmark is separate from unit-test gates. It measures reporter planning, all test-status lookups (including index construction), and final-report reconciliation using three warmup runs and seven measured runs. Compare results on the same machine; real workspace discovery also depends on Playwright and test configuration.
 
 ### TypeScript 7 and TypeScript 6 side by side
