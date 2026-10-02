@@ -1,5 +1,10 @@
 # Change Log
 
+## 4.2.0 - 2026-10-02
+
+- Merge normal Run CodeLens actions into one configurable action. New resource-scoped `run.backend` defaults to `companion`; choose `official` for Microsoft Testing. Command Palette Run, editor Run File, and More… follow the same setting; Debug remains Microsoft-owned.
+- Treat legacy custom `companionRun` CodeLens actions as `run` aliases and remove duplicate Run actions. Explicit companion commands remain available.
+
 ## 4.1.0 - 2026-10-02
 
 - Keep Inspector, Companion Run, and Flake Lab browser overrides independent; an explicit `config` override opts out of the top-level default. Stop reading legacy browser settings.

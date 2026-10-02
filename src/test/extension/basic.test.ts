@@ -2,6 +2,7 @@ import * as assert from 'assert';
 import './runtime.test';
 import * as vscode from 'vscode';
 import { EditorTestSelection } from '../../core/editorSelections';
+import { Settings } from '../../settings';
 import { cliSelectionForEditor } from '../../core/selectionArguments';
 import type { ExtensionApi } from '../../extension';
 import { CompanionCliRunRequest, CompanionRunSummary } from '../../core/companionTypes';
@@ -307,9 +308,9 @@ suite('Playwright CodeLens Runner extension', () => {
 
       await configuration.update('codeLens.layout', 'companion-only', vscode.ConfigurationTarget.Global);
       assertLayout(await codeLenses(uri), {
-        file: ['flakeLab', 'more', 'openUi', 'runCompanion', 'selectConfig'],
-        suite: ['flakeLab', 'inspectTest', 'more', 'openUi', 'runCompanion'],
-        test: ['flakeLab', 'inspectTest', 'more', 'openUi', 'runCompanion'],
+        file: ['flakeLab', 'more', 'openUi', 'runFile', 'selectConfig'],
+        suite: ['flakeLab', 'inspectTest', 'more', 'openUi', 'runTest'],
+        test: ['flakeLab', 'inspectTest', 'more', 'openUi', 'runTest'],
       });
 
       await configuration.update('codeLens.fileActions', ['more'], vscode.ConfigurationTarget.Global);
@@ -321,6 +322,14 @@ suite('Playwright CodeLens Runner extension', () => {
         suite: ['inspectTest'],
         test: ['openUi'],
       });
+      await configuration.update('codeLens.fileActions', ['companionRun', 'more', 'run'], vscode.ConfigurationTarget.Global);
+      await configuration.update('codeLens.suiteActions', ['run', 'companionRun'], vscode.ConfigurationTarget.Global);
+      await configuration.update('codeLens.testActions', ['companionRun', 'run'], vscode.ConfigurationTarget.Global);
+      const merged = await codeLenses(uri);
+      assertLayout(merged, { file: ['more', 'runFile'], suite: ['runTest'], test: ['runTest'] });
+      assert.ok(!merged.some((lens) => lens.command?.title.includes('Run Companion')));
+      assert.strictEqual(new Settings(uri).codeLensActions('file')[0], 'run');
+
     } finally {
       for (const key of keys) {
         await configuration.update(key, previous.get(key), vscode.ConfigurationTarget.Global);
@@ -383,7 +392,139 @@ suite('Playwright CodeLens Runner extension', () => {
     assert.strictEqual(cliSelectionForEditor(flattened).line, flattened.position.line + 1);
   });
 
+  test('normal Run dispatches scopes to the current backend and Debug stays official', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'dynamic.spec.ts');
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', uri);
+    const previousBackend = configuration.inspect('run.backend')?.globalValue;
+    const restoreAutoFocus = await disableAutoFocus(uri);
+    const originalRun = api.runner.run;
+    const originalBridgeRun = api.bridge.run;
+    const originalBridgeUri = api.bridge.runUri;
+    const originalBridgeCursor = api.bridge.runAtActiveCursor;
+    const originalQuickPick = vscode.window.showQuickPick;
+    const companion: CompanionCliRunRequest[] = [];
+    const official: string[] = [];
+    try {
+      await configuration.update('run.backend', undefined, vscode.ConfigurationTarget.Global);
+      assert.strictEqual(new Settings(uri).runBackend, 'companion');
+      const document = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(document, { preview: false });
+      await api.discovery.refreshAll();
+      const lenses = await codeLenses(uri);
+      const selections = new Map(lenses.filter((lens) => lens.command?.command.endsWith('.runFile')
+        || lens.command?.command.endsWith('.runTest')).map((lens) => {
+        const selection = lens.command?.arguments?.[0] as EditorTestSelection;
+        return [selection.kind, selection];
+      }));
+      const suiteUri = vscode.Uri.joinPath(fixture.uri, 'tests', 'example.spec.ts');
+      await vscode.workspace.openTextDocument(suiteUri);
+      const suiteLens = (await codeLenses(suiteUri)).find((lens) =>
+        (lens.command?.arguments?.[0] as EditorTestSelection | undefined)?.kind === 'suite');
+      assert.ok(suiteLens?.command);
+      selections.set('suite', suiteLens.command.arguments?.[0] as EditorTestSelection);
+      assert.ok(selections.has('file'));
+      assert.ok(selections.has('test'));
+      assert.ok((selections.get('test')?.titlePaths?.length ?? 0) > 1);
+      api.runner.run = async (_target, request) => {
+        companion.push(request);
+        return { ...request, id: 'dispatch-test', startedAt: Date.now(), status: 'passed', durationMs: 1,
+          total: 1, passed: 1, failed: 0, flaky: 0, skipped: 0, failures: [] };
+      };
+      api.bridge.run = async (selection, mode) => { official.push(`${selection.kind}:${mode}`); };
+      api.bridge.runUri = async (_uri, mode) => { official.push(`uri:${mode}`); };
+      api.bridge.runAtActiveCursor = async (mode) => { official.push(`cursor:${mode}`); };
+      for (const selection of selections.values()) {
+        const command = selection.kind === 'file' ? 'runFile' : 'runTest';
+        await vscode.commands.executeCommand(`playwrightCodeLensRunner.${command}`, selection);
+      }
+      assert.strictEqual(companion.length, selections.size);
+      assert.deepStrictEqual(official, []);
+      assert.ok(companion.some((request) => (request.initialTests?.length ?? 0) === 3), 'generated declaration keeps all cases');
+      const testSelection = selections.get('test')!;
+      editor.selection = new vscode.Selection(testSelection.position.line, testSelection.position.character,
+        testSelection.position.line, testSelection.position.character);
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runTest');
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runFile');
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runFile', uri);
+      assert.strictEqual(companion.length, selections.size + 3);
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.debugTest', testSelection);
+      assert.deepStrictEqual(official, ['test:debug']);
+      await configuration.update('run.backend', 'official', vscode.ConfigurationTarget.Global);
+      for (const selection of selections.values()) {
+        await vscode.commands.executeCommand(`playwrightCodeLensRunner.${selection.kind === 'file' ? 'runFile' : 'runTest'}`, selection);
+      }
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runFile', uri);
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runTest');
+      assert.strictEqual(official.length, selections.size + 3);
+      assert.strictEqual(companion.length, selections.size + 3);
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runCompanion', testSelection);
+      assert.strictEqual(companion.length, selections.size + 4, 'explicit companion ignores official backend');
+      const descriptions: string[] = [];
+      vscode.window.showQuickPick = (async (items: readonly vscode.QuickPickItem[]) => {
+        const runs = items.filter((item) => item.label === '$(play) Run');
+        assert.strictEqual(runs.length, 1, 'More has one normal Run action');
+        assert.ok(!items.some((item) => item.label.includes('Run Companion')));
+        descriptions.push(runs[0].description ?? '');
+        return runs[0];
+      }) as unknown as typeof vscode.window.showQuickPick;
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.more', testSelection);
+      assert.strictEqual(official.length, selections.size + 4);
+      await configuration.update('run.backend', 'companion', vscode.ConfigurationTarget.Global);
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.more', testSelection);
+      assert.strictEqual(companion.length, selections.size + 5);
+      assert.deepStrictEqual(descriptions, ['Microsoft Testing', 'Companion CLI · normal run']);
+      await configuration.update('run.backend', 'unknown', vscode.ConfigurationTarget.Global);
+      assert.strictEqual(new Settings(uri).runBackend, 'companion', 'invalid backend falls back to companion');
+
+    } finally {
+      api.runner.run = originalRun;
+      api.bridge.run = originalBridgeRun;
+      api.bridge.runUri = originalBridgeUri;
+      api.bridge.runAtActiveCursor = originalBridgeCursor;
+      vscode.window.showQuickPick = originalQuickPick;
+      await configuration.update('run.backend', previousBackend, vscode.ConfigurationTarget.Global);
+      await restoreAutoFocus();
+    }
+  });
+
+  test('a default CodeLens run executes exactly once through companion CLI', async () => {
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', fixture.uri);
+    const previousBackend = configuration.inspect('run.backend')?.globalValue;
+    await configuration.update('run.backend', undefined, vscode.ConfigurationTarget.Global);
+    const restoreAutoFocus = await disableAutoFocus(fixture.uri);
+    const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
+    try {
+      await vscode.workspace.fs.delete(marker);
+    } catch {
+      // The first run has no marker yet.
+    }
+
+    try {
+      const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'delegation.spec.ts');
+      const document = await vscode.workspace.openTextDocument(uri);
+      await vscode.window.showTextDocument(document, { preview: false });
+      await api.discovery.refreshAll();
+      await vscode.commands.executeCommand('testing.refreshTests');
+
+      const lenses = await vscode.commands.executeCommand<vscode.CodeLens[]>('vscode.executeCodeLensProvider', uri);
+      const runLens = (lenses ?? []).find((lens) => lens.command?.title === '$(play) Run Test');
+      assert.ok(runLens?.command, 'test Run CodeLens is available');
+
+      await vscode.commands.executeCommand(runLens.command.command, ...(runLens.command.arguments ?? []));
+      const lines = await waitForMarker(marker);
+      assert.deepStrictEqual(lines, ['run'], 'the selected test executes only once');
+      assert.ok(api.runner.latestRun, 'companion results are recorded');
+      assert.strictEqual(api.runner.latestRun?.status, 'passed');
+    } finally {
+      await configuration.update('run.backend', previousBackend, vscode.ConfigurationTarget.Global);
+      await restoreAutoFocus();
+    }
+  });
+
   test('a CodeLens run is executed exactly once by the Microsoft extension', async () => {
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', fixture.uri);
+    const previousBackend = configuration.inspect('run.backend')?.globalValue;
+    await configuration.update('run.backend', 'official', vscode.ConfigurationTarget.Global);
     const restoreAutoFocus = await disableAutoFocus(fixture.uri);
     const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
     try {
@@ -407,11 +548,15 @@ suite('Playwright CodeLens Runner extension', () => {
       const lines = await waitForMarker(marker);
       assert.deepStrictEqual(lines, ['run'], 'only the official TestController executes the selected test');
     } finally {
+      await configuration.update('run.backend', previousBackend, vscode.ConfigurationTarget.Global);
       await restoreAutoFocus();
     }
   });
 
   test('file Run delegates by URI without companion CLI discovery', async () => {
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner', fixture.uri);
+    const previousBackend = configuration.inspect('run.backend')?.globalValue;
+    await configuration.update('run.backend', 'official', vscode.ConfigurationTarget.Global);
     const restoreAutoFocus = await disableAutoFocus(fixture.uri);
     const marker = vscode.Uri.joinPath(fixture.uri, 'official-run-marker.txt');
     try {
@@ -434,6 +579,7 @@ suite('Playwright CodeLens Runner extension', () => {
       assert.deepStrictEqual(await waitForMarker(marker), ['run']);
     } finally {
       api.discovery.resolveTargetForFile = originalResolve;
+      await configuration.update('run.backend', previousBackend, vscode.ConfigurationTarget.Global);
       await restoreAutoFocus();
     }
     assert.strictEqual(resolutionCalled, false);

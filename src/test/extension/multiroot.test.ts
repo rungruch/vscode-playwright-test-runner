@@ -21,6 +21,35 @@ suite('multi-root workspace discovery', () => {
     await api.discovery.refreshTargets();
   });
 
+  test('Run backend settings follow the selected workspace folder', async () => {
+    const folders = vscode.workspace.workspaceFolders!;
+    const configurations = folders.map((folder) => vscode.workspace.getConfiguration('playwrightCodeLensRunner', folder.uri));
+    const previous = configurations.map((config) => config.inspect('run.backend')?.workspaceFolderValue);
+    const settingsUris = folders.map((folder) => vscode.Uri.joinPath(folder.uri, '.vscode', 'settings.json'));
+    const settingsExisted = await Promise.all(settingsUris.map((uri) => vscode.workspace.fs.stat(uri).then(() => true, () => false)));
+    const originalRunUri = api.bridge.runUri;
+    const captured: string[] = [];
+    try {
+      await configurations[0].update('run.backend', 'companion', vscode.ConfigurationTarget.WorkspaceFolder);
+      await configurations[1].update('run.backend', 'official', vscode.ConfigurationTarget.WorkspaceFolder);
+      const firstUri = vscode.Uri.joinPath(folders[0].uri, 'tests', 'root.spec.ts');
+      const secondUri = vscode.Uri.joinPath(folders[1].uri, 'tests', 'app2.spec.ts');
+      assert.strictEqual(new Settings(firstUri).runBackend, 'companion');
+      assert.strictEqual(new Settings(secondUri).runBackend, 'official');
+      api.bridge.runUri = async (uri) => { captured.push(uri.toString()); };
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.runFile', secondUri);
+      assert.deepStrictEqual(captured, [secondUri.toString()]);
+    } finally {
+      api.bridge.runUri = originalRunUri;
+      for (let index = 0; index < configurations.length; index++) {
+        await configurations[index].update('run.backend', previous[index], vscode.ConfigurationTarget.WorkspaceFolder);
+        if (!settingsExisted[index]) {
+          await vscode.workspace.fs.delete(settingsUris[index]);
+        }
+      }
+    }
+  });
+
   test('discovers root, overlapping, sibling-testDir, and second-root configs', async () => {
     await api.discovery.refreshAll();
     const configs = api.discovery.currentTargets

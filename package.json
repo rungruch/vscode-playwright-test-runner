@@ -1,8 +1,8 @@
 {
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
-  "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "4.1.0",
+  "description": "Playwright CodeLens actions with companion or official Run, official Debug, and scoped Inspector/UI commands",
+  "version": "4.2.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -113,7 +113,7 @@
               "type": "string"
             },
             "default": [],
-            "markdownDescription": "Extra CLI options appended to companion Inspector and Playwright UI runs. Native Run/Debug options are owned by the Microsoft Playwright extension (see https://playwright.dev/docs/test-cli).",
+            "markdownDescription": "Extra CLI options appended to companion Run, Flake Lab, Inspector, and Playwright UI runs. Native Run/Debug options are owned by the Microsoft Playwright extension (see https://playwright.dev/docs/test-cli).",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.browser": {
@@ -159,6 +159,17 @@
             },
             "default": {},
             "markdownDescription": "Environment variables added to companion CLI discovery, Inspector, UI, report, trace, and codegen processes. Values support variable substitution.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.run.backend": {
+            "type": "string",
+            "enum": ["companion", "official"],
+            "enumDescriptions": [
+              "Run with this extension's Playwright CLI runner and companion results.",
+              "Run with Playwright Test for VS Code and Microsoft Testing results."
+            ],
+            "default": "companion",
+            "markdownDescription": "Backend for Run actions in CodeLens, More…, Command Palette, and the editor Run File button. Debug always uses the Microsoft Playwright extension.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.companion.showCliOutput": {
@@ -345,7 +356,7 @@
             "enumDescriptions": [
               "Show the complete file, suite, and test action sets.",
               "Show Run, Debug, and More\u2026 for every declaration.",
-              "Hide redundant gutter Run/Debug actions and promote Companion Run, Inspect, UI, and Flake Lab.",
+              "Show Run, Inspect, UI, and Flake Lab without Debug. Run uses the selected run.backend.",
               "Use the fileActions, suiteActions, and testActions settings below."
             ],
             "default": "full",
@@ -407,7 +418,7 @@
               "ui",
               "config"
             ],
-            "markdownDescription": "Actions shown for a file when `codeLens.layout` is `custom`. `config` shows the companion CLI config selector; file Inspect is intentionally unavailable.",
+            "markdownDescription": "Actions shown for a file when `codeLens.layout` is `custom`. `config` shows the companion CLI config selector; file Inspect is intentionally unavailable. Legacy `companionRun` is an alias for `run`; the backend setting controls execution.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.suiteActions": {
@@ -431,7 +442,7 @@
               "inspect",
               "ui"
             ],
-            "markdownDescription": "Actions shown for a suite when `codeLens.layout` is `custom`.",
+            "markdownDescription": "Actions shown for a suite when `codeLens.layout` is `custom`. Legacy `companionRun` is an alias for `run`; the backend setting controls execution.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.testActions": {
@@ -457,7 +468,7 @@
               "ui",
               "cases"
             ],
-            "markdownDescription": "Actions shown for a test when `codeLens.layout` is `custom`. `cases` appears only for collapsed generated/data-driven cases.",
+            "markdownDescription": "Actions shown for a test when `codeLens.layout` is `custom`. `cases` appears only for collapsed generated/data-driven cases. Legacy `companionRun` is an alias for `run`; the backend setting controls execution.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.discovery.watchPatterns": {

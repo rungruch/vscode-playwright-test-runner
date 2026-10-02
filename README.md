@@ -6,7 +6,7 @@
 
 Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
 
-Version 4.1 improves exact failed-test reruns, process cleanup, Windows launches, generated-case performance, shared artifacts, and historical output. Imported fixture or data changes can refresh discovery through the new opt-in watch patterns.
+Version 4.2 unifies Run actions with a configurable backend and makes companion CLI runs the default. Choose Microsoft's Playwright extension through `run.backend`; Debug continues using Microsoft Testing.
 
 Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
 
@@ -22,10 +22,11 @@ test.describe('checkout', () => {
   test('submits an order', async ({ page }) => {
 ```
 
-The CodeLens workbench supports three layouts:
+The CodeLens workbench supports four layouts:
 
 - `full` keeps the complete action sets. Files also show the resolved **CLI Config**, and generated tests show **Cases (N)…**.
 - `compact` shows `Run · Debug · More…`; CLI config selection, Inspector/UI, and generated cases remain available inside **More…**.
+- `companion-only` shows Run, Inspect, Playwright UI, and Flake Lab without Debug. Run still follows the selected backend.
 - `custom` uses separate `codeLens.fileActions`, `codeLens.suiteActions`, and `codeLens.testActions` arrays. The file-only `config` action and generated-test-only `cases` action are configurable too.
 
 For example:
@@ -39,17 +40,28 @@ For example:
 }
 ```
 
-Loop-generated tests remain one declaration. Microsoft Testing Run/Debug and the declaration's direct Inspector/UI actions target all generated cases at that source line. **Cases (N)…** lets you choose one exact case for Inspector or UI, combining the declaration line with file- and title-boundary-aware filtering.
+**Run uses the companion CLI runner by default**, with live CodeLens status and results in **Playwright Runs**. Choose Microsoft's Playwright extension for Run instead with:
+
+```json
+{
+  "playwrightCodeLensRunner.run.backend": "official"
+}
+```
+
+The setting accepts `companion` (default) or `official`, can be configured per workspace folder, and applies immediately to CodeLens, **More…**, Command Palette Run commands, and the editor Run File button. **Debug** always uses Microsoft’s extension. Existing custom `companionRun` CodeLens entries become aliases for `run`; including both produces one Run action using the selected backend.
+
+Loop-generated tests remain one declaration. Run with either backend, Microsoft Debug, and the declaration's direct Inspector/UI actions target all generated cases at that source line. **Cases (N)…** lets you choose one exact case for Inspector or UI, combining the declaration line with file- and title-boundary-aware filtering.
 
 | Action | Execution owner | Result location |
 | --- | --- | --- |
-| Run / Debug | Microsoft Playwright extension | VS Code Testing, gutter, output, duration, and debugger |
+| Run (default) | Playwright CodeLens Runner | Playwright Runs sidebar, live CodeLens status, and CLI output |
+| Run (`official`) / Debug | Microsoft Playwright extension | VS Code Testing, gutter, output, duration, and debugger |
 | Inspect | Playwright CodeLens Runner | Playwright Inspector and an integrated terminal |
 | Playwright UI | Playwright CodeLens Runner | Playwright UI and an integrated terminal |
 
 ## Companion Runs, Flake Lab, and sidebar dashboard
 
-**Run Companion Test (Normal CLI Run)** is an extension-owned Playwright CLI execution available via **More…** and Command Palette (`playwrightCodeLensRunner.runCompanion`). It runs tests with target-scoped arguments without native VS Code test run duplication and without Flake Lab's repeating overhead.
+**Run Companion Test (Normal CLI Run)** explicitly uses the companion backend regardless of `run.backend` and remains available through Command Palette (`playwrightCodeLensRunner.runCompanion`). It runs tests with target-scoped arguments without native VS Code test run duplication and without Flake Lab's repeating overhead.
 
 **Flake Lab** is a companion CLI run for the current file, suite, test, or generated-case declaration. It deliberately does not create a native VS Code test run. By default it uses `--repeat-each 10`, `--workers 1`, `--retries 1`, `--trace on`, and `--fail-on-flaky-tests`; the last flag requires Playwright Test 1.52 or later.
 
@@ -201,6 +213,7 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 | `playwrightCodeLensRunner.runOptions` | Extra Inspector and Playwright UI options | `[]` |
 | `playwrightCodeLensRunner.inspector.browser` | Inspector browser/project override | `config` |
 | `playwrightCodeLensRunner.browser` | Default browser for companion modes | `config` |
+| `playwrightCodeLensRunner.run.backend` | Backend for unified Run: `companion` or `official`; Debug stays Microsoft | `companion` |
 | `playwrightCodeLensRunner.companion.browser` | Companion Run browser override; explicit `config` opts out of the default | inherits `browser` |
 | `playwrightCodeLensRunner.flakeLab.browser` | Flake Lab browser override; explicit `config` opts out of the default | inherits `browser` |
 | `playwrightCodeLensRunner.environment` | Environment for discovery and CLI processes | `{}` |
@@ -216,12 +229,12 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 | `playwrightCodeLensRunner.artifacts.scanDirectories` | Local artifact roots per target | `playwright-report`, `blob-report`, `test-results` |
 | `playwrightCodeLensRunner.codeLens.enabled` | Enable editor actions | `true` |
 | `playwrightCodeLensRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
-| `playwrightCodeLensRunner.codeLens.layout` | `full`, `compact`, or `custom` CodeLens layout | `full` |
+| `playwrightCodeLensRunner.codeLens.layout` | `full`, `compact`, `companion-only`, or `custom` CodeLens layout | `full` |
 | `playwrightCodeLensRunner.codeLens.fileActions` | Custom file actions: `run`, `debug`, `ui`, `config`, `more` | `run`, `debug`, `ui`, `config` |
 | `playwrightCodeLensRunner.codeLens.suiteActions` | Custom actions for suite lenses | `run`, `debug`, `inspect`, `ui` |
 | `playwrightCodeLensRunner.codeLens.testActions` | Custom test actions, including generated-only `cases` | `run`, `debug`, `inspect`, `ui`, `cases` |
 
-Paths and environment values support `${workspaceFolder}`, `${packageRoot}`, and `${configDir}`. These companion settings do not override Microsoft's native Run/Debug configuration.
+Paths and environment values support `${workspaceFolder}`, `${packageRoot}`, and `${configDir}`. Companion CLI options apply when Run uses the companion backend; Microsoft's native Run/Debug options remain owned by its extension.
 
 ## Marketplace identity
 

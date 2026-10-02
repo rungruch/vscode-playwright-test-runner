@@ -12,6 +12,7 @@ const DEFAULT_CODE_LENS_PATTERN = '**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,c
 export type CodeLensLayout = 'full' | 'compact' | 'companion-only' | 'custom';
 export type CodeLensDensity = 'standard' | 'short' | 'icon-only';
 export type CodeLensAction = 'run' | 'debug' | 'inspect' | 'ui' | 'config' | 'cases' | 'more' | 'companionRun' | 'flake';
+export type RunBackend = 'companion' | 'official';
 export type CompanionShowCliOutput = 'on-run' | 'on-failure' | 'never';
 export type InspectorBrowser = BrowserPreference;
 export { FlakeLabSizePreset };
@@ -25,9 +26,9 @@ const FULL_FILE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'ui', 'con
 const FULL_SUITE_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'more'];
 const FULL_TEST_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'inspect', 'ui', 'cases', 'more'];
 const COMPACT_ACTIONS: readonly CodeLensAction[] = ['run', 'debug', 'more'];
-const COMPANION_ONLY_FILE_ACTIONS: readonly CodeLensAction[] = ['companionRun', 'ui', 'flake', 'config', 'more'];
-const COMPANION_ONLY_SUITE_ACTIONS: readonly CodeLensAction[] = ['companionRun', 'inspect', 'ui', 'flake', 'more'];
-const COMPANION_ONLY_TEST_ACTIONS: readonly CodeLensAction[] = ['companionRun', 'inspect', 'ui', 'flake', 'cases', 'more'];
+const COMPANION_ONLY_FILE_ACTIONS: readonly CodeLensAction[] = ['run', 'ui', 'flake', 'config', 'more'];
+const COMPANION_ONLY_SUITE_ACTIONS: readonly CodeLensAction[] = ['run', 'inspect', 'ui', 'flake', 'more'];
+const COMPANION_ONLY_TEST_ACTIONS: readonly CodeLensAction[] = ['run', 'inspect', 'ui', 'flake', 'cases', 'more'];
 
 /**
  * Reads `playwrightCodeLensRunner.*` settings. Empty strings, arrays and
@@ -89,6 +90,10 @@ export class Settings {
   get companionShowCliOutput(): CompanionShowCliOutput {
     const value = this.configuration().get<string>('companion.showCliOutput', 'on-run');
     return value === 'on-failure' || value === 'never' ? value : 'on-run';
+  }
+
+  get runBackend(): RunBackend {
+    return this.configuration().get<string>('run.backend', 'companion') === 'official' ? 'official' : 'companion';
   }
 
   get companionBrowser(): BrowserPreference {
@@ -226,7 +231,7 @@ export class Settings {
     const setting = kind === 'file' ? 'codeLens.fileActions' : kind === 'suite' ? 'codeLens.suiteActions' : 'codeLens.testActions';
     const configured = this.configuration().get<string[]>(setting, []);
     const allowed = ACTIONS_BY_KIND[kind];
-    return [...new Set(configured.filter((action): action is CodeLensAction => (
+    return [...new Set(configured.map((action) => action === 'companionRun' ? 'run' : action).filter((action): action is CodeLensAction => (
       isCodeLensAction(action) && allowed.includes(action)
     )))];
   }

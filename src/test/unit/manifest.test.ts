@@ -43,8 +43,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 4.1.0 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '4.1.0');
+  test('declares the 4.2.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '4.2.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
@@ -58,6 +58,13 @@ suite('extension manifest', () => {
     const setting = properties['playwrightCodeLensRunner.inspector.browser'];
     assert.strictEqual(setting?.default, 'config');
     assert.deepStrictEqual(setting?.enum, ['config', 'chromium', 'firefox', 'webkit']);
+  });
+
+  test('defaults Run to the resource-scoped companion backend', () => {
+    const setting = manifest.contributes?.configuration?.[0].properties?.['playwrightCodeLensRunner.run.backend'];
+    assert.strictEqual(setting?.default, 'companion');
+    assert.deepStrictEqual(setting?.enum, ['companion', 'official']);
+    assert.strictEqual(setting?.scope, 'resource');
   });
 
   test('contributes validated full, compact, companion-only, and custom CodeLens settings', () => {

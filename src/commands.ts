@@ -59,9 +59,9 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.openOfficialSettings', () => deps.bridge.openOfficialSettings());
   register('playwrightCodeLensRunner.rerunLast', () => deps.bridge.rerunLast());
 
-  register('playwrightCodeLensRunner.runTest', (selection?: EditorTestSelection) => delegatedTestCommand(deps, selection, 'run'));
+  register('playwrightCodeLensRunner.runTest', (selection?: EditorTestSelection) => runCommand(deps, selection, 'test'));
   register('playwrightCodeLensRunner.debugTest', (selection?: EditorTestSelection) => delegatedTestCommand(deps, selection, 'debug'));
-  register('playwrightCodeLensRunner.runFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'run'));
+  register('playwrightCodeLensRunner.runFile', (arg?: EditorTestSelection | vscode.Uri) => runCommand(deps, arg, 'file'));
   register('playwrightCodeLensRunner.debugFile', (arg?: EditorTestSelection | vscode.Uri) => delegatedFileCommand(deps, arg, 'debug'));
   register('playwrightCodeLensRunner.inspectTest', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'debug'));
   register('playwrightCodeLensRunner.openUi', (arg?: EditorTestSelection | vscode.Uri) => interactiveCliCommand(deps, arg, 'ui'));
@@ -100,6 +100,33 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.showReport', () => showReportCommand(deps));
   register('playwrightCodeLensRunner.showTrace', (uri?: vscode.Uri) => showTraceCommand(deps, uri));
   register('playwrightCodeLensRunner.recordTest', (uri?: vscode.Uri) => recordTestCommand(deps, uri));
+}
+
+/** Dispatch normal runs using the selected file's current backend setting. */
+async function runCommand(
+  deps: CommandDeps,
+  arg: EditorTestSelection | vscode.Uri | undefined,
+  scope: 'file' | 'test',
+): Promise<void> {
+  const uri = isEditorSelection(arg) ? vscode.Uri.file(arg.file)
+    : isUri(arg) ? arg : vscode.window.activeTextEditor?.document.uri;
+  if (new Settings(uri).runBackend === 'official') {
+    if (scope === 'file') {
+      await delegatedFileCommand(deps, arg, 'run');
+    } else {
+      await delegatedTestCommand(deps, isEditorSelection(arg) ? arg : undefined, 'run');
+    }
+    return;
+  }
+  if (scope === 'file') {
+    const selection: EditorTestSelection | vscode.Uri | undefined = isEditorSelection(arg)
+      ? { ...arg, kind: 'file', position: { line: 0, character: 0 },
+        fullTitle: undefined, titlePath: undefined, titlePaths: undefined }
+      : uri;
+    await companionRunCommand(deps, selection);
+  } else {
+    await companionRunCommand(deps, arg);
+  }
 }
 
 async function delegatedTestCommand(
@@ -203,11 +230,10 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     void vscode.window.showInformationMessage('No Playwright selection found at the current position.');
     return;
   }
-  const scopeLabel = resolved.kind === 'file' ? 'File' : resolved.kind === 'suite' ? 'Suite' : 'Test';
+  const backend = new Settings(vscode.Uri.file(resolved.file)).runBackend;
   const choices = [
-    { label: '$(play) Run', description: 'Microsoft Testing', action: 'run' as const },
+    { label: '$(play) Run', description: backend === 'companion' ? 'Companion CLI · normal run' : 'Microsoft Testing', action: 'run' as const },
     { label: '$(debug) Debug', description: 'Microsoft Testing', action: 'debug' as const },
-    { label: `$(play) Run Companion ${scopeLabel}`, description: 'Companion CLI · normal run', action: 'companionRun' as const },
     ...(resolved.kind === 'file' ? [] : [{ label: '$(eye) Inspect', description: 'Companion CLI', action: 'inspect' as const }]),
     { label: '$(browser) Playwright UI', description: 'Companion CLI', action: 'ui' as const },
     { label: '$(beaker) Flake Lab', description: 'Companion CLI · repeat selected scope', action: 'flake' as const },
@@ -227,11 +253,9 @@ async function moreCommand(deps: CommandDeps, selection: EditorTestSelection | u
     return;
   }
   if (picked.action === 'run') {
-    await delegatedTestCommand(deps, resolved, 'run');
+    await runCommand(deps, resolved, resolved.kind === 'file' ? 'file' : 'test');
   } else if (picked.action === 'debug') {
     await delegatedTestCommand(deps, resolved, 'debug');
-  } else if (picked.action === 'companionRun') {
-    await companionRunCommand(deps, resolved);
   } else if (picked.action === 'inspect') {
     await interactiveCliCommand(deps, resolved, 'debug');
   } else if (picked.action === 'ui') {

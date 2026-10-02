@@ -16,8 +16,8 @@ const TEST_DOCUMENTS: vscode.DocumentSelector = [
 
 /**
  * Editor-first Playwright actions backed by fast AST and CLI discovery.
- * Run and Debug can be delegated to Microsoft's Playwright extension,
- * or promoted to companion CLI runs with live execution status.
+ * Run uses the configured companion or Microsoft backend; Debug delegates
+ * to Microsoft's Playwright extension.
  */
 export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vscode.Disposable {
   private readonly emitter = new vscode.EventEmitter<void>();
@@ -239,15 +239,6 @@ function addActions(
         selection.kind === 'file' ? 'playwrightCodeLensRunner.debugFile' : 'playwrightCodeLensRunner.debugTest',
         selection,
       );
-    } else if (action === 'companionRun') {
-      const label = density === 'icon-only'
-        ? '$(play)'
-        : density === 'short'
-          ? '$(play) Run'
-          : selection.kind === 'file'
-            ? '$(play) Run Companion File'
-            : `$(play) Run Companion ${selection.kind === 'suite' ? 'Suite' : 'Test'}`;
-      addLens(lenses, range, label, 'playwrightCodeLensRunner.runCompanion', selection);
     } else if (action === 'flake') {
       const label = density === 'icon-only'
         ? '$(beaker)'
