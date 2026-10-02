@@ -28,6 +28,14 @@ suite('responsive editor and concurrent companion runs', () => {
     const terminal = createCliTerminal(fakeTarget(directory), 'Playwright argv regression', [
       '-e', 'require("fs").writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))', '--', output, ...values,
     ], path.join(extension.extensionPath, 'dist', 'terminalLauncher.cjs'));
+    const closed = new Promise<void>((resolve) => {
+      const listener = vscode.window.onDidCloseTerminal((candidate) => {
+        if (candidate === terminal) {
+          listener.dispose();
+          resolve();
+        }
+      });
+    });
     try {
       let content: string | undefined;
       const deadline = Date.now() + 10_000;
@@ -39,7 +47,9 @@ suite('responsive editor and concurrent companion runs', () => {
       assert.deepStrictEqual(JSON.parse(content), values);
     } finally {
       terminal.dispose();
-      await fs.rm(directory, { recursive: true, force: true });
+      await closed;
+      // Windows can briefly retain the working directory after the terminal closes.
+      await fs.rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     }
   });
   test('keeps browser modes independent and lets explicit config opt out of the default', async () => {
@@ -232,7 +242,7 @@ suite('responsive editor and concurrent companion runs', () => {
 
   test('bounds inactive discovery entries while retaining open documents and recently used files', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codelens-cache-'));
-    const pinned = path.join(directory, 'open.spec.ts');
+    const pinned = vscode.Uri.file(path.join(directory, 'open.spec.ts')).fsPath;
     await fs.writeFile(pinned, '');
     await vscode.workspace.openTextDocument(vscode.Uri.file(pinned));
     const target = fakeTarget(directory);

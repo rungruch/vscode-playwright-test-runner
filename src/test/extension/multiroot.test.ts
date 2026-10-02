@@ -57,11 +57,11 @@ suite('multi-root workspace discovery', () => {
       .filter((configFile) => configFile.length > 0)
       .sort();
     assert.strictEqual(configs.length, 5, `expected five configs, found: ${configs.join(', ')}`);
-    assert.ok(configs.some((configFile) => configFile.endsWith('app1/playwright.config.ts')));
-    assert.ok(configs.some((configFile) => configFile.endsWith('app1/configs/playwright.config.ts')));
-    assert.ok(configs.some((configFile) => configFile.endsWith('app1/cross-root/playwright.config.ts')));
-    assert.ok(configs.some((configFile) => configFile.endsWith('app1/tests/playwright.config.ts')));
-    assert.ok(configs.some((configFile) => configFile.endsWith('app2/playwright.config.ts')));
+    assert.ok(configs.some((configFile) => configFile.endsWith(path.join('app1', 'playwright.config.ts'))));
+    assert.ok(configs.some((configFile) => configFile.endsWith(path.join('app1', 'configs', 'playwright.config.ts'))));
+    assert.ok(configs.some((configFile) => configFile.endsWith(path.join('app1', 'cross-root', 'playwright.config.ts'))));
+    assert.ok(configs.some((configFile) => configFile.endsWith(path.join('app1', 'tests', 'playwright.config.ts'))));
+    assert.ok(configs.some((configFile) => configFile.endsWith(path.join('app2', 'playwright.config.ts'))));
 
     for (const target of api.discovery.currentTargets) {
       assert.strictEqual(api.discovery.errorFor(target.id), undefined, `no discovery error for ${target.id}`);

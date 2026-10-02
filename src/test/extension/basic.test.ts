@@ -565,8 +565,10 @@ suite('Playwright CodeLens Runner extension', () => {
       // The preceding test may already have cleaned the marker.
     }
     const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'delegation.spec.ts');
-    await vscode.commands.executeCommand('testing.refreshTests');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.commands.executeCommand('testing.refreshTests');
+    // Refresh resolves before VS Code's 200 ms test-tree publication batch flushes.
+    await delay(300);
 
     let resolutionCalled = false;
     const originalResolve = api.discovery.resolveTargetForFile;
