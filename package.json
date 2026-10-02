@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with official Run/Debug integration and scoped Inspector/UI commands",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -149,7 +149,7 @@
               "Use the config project named webkit, or Playwright's WebKit browser when no projects are defined."
             ],
             "default": "config",
-            "markdownDescription": "Browser used only by **Inspect Test/Suite**. `config` preserves Playwright config behavior and **Configure CLI Projects**. A forced browser selects the same-named config project; Playwright does not permit `--browser` when a config defines projects.",
+            "markdownDescription": "Browser used only by **Inspect Test/Suite**. `config` preserves Playwright config behavior and **Configure CLI Projects**. A forced browser selects the same-named config project; Playwright does not permit `--browser` when a config defines projects. When unset, inherits the top-level browser setting. Explicit `config` opts out of that default. Other modes never affect this setting.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.environment": {
@@ -181,7 +181,7 @@
               "webkit"
             ],
             "default": "config",
-            "markdownDescription": "Browser/project override applied to companion CLI runs. Uses the matching project or passes --browser when no projects are configured.",
+            "markdownDescription": "Browser/project override applied to companion CLI runs. Uses the matching project or passes --browser when no projects are configured. When unset, inherits the top-level browser setting. Explicit `config` opts out of that default. Other modes never affect this setting.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.flakeLab.browser": {
@@ -193,7 +193,7 @@
               "webkit"
             ],
             "default": "config",
-            "markdownDescription": "Browser/project override applied to companion Flake Lab runs. Uses the matching project or passes --browser when no projects are configured.",
+            "markdownDescription": "Browser/project override applied to companion Flake Lab runs. Uses the matching project or passes --browser when no projects are configured. When unset, inherits the top-level browser setting. Explicit `config` opts out of that default. Other modes never affect this setting.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.flakeLab.size": {
@@ -344,7 +344,7 @@
             ],
             "enumDescriptions": [
               "Show the complete file, suite, and test action sets.",
-              "Show Run, Debug, and More… for every declaration.",
+              "Show Run, Debug, and More\u2026 for every declaration.",
               "Hide redundant gutter Run/Debug actions and promote Companion Run, Inspect, UI, and Flake Lab.",
               "Use the fileActions, suiteActions, and testActions settings below."
             ],
@@ -377,7 +377,7 @@
           "playwrightCodeLensRunner.codeLens.showRunningStatus": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Display a live running indicator ($(sync~spin) Running…) while a companion test is executing.",
+            "markdownDescription": "Display a live running indicator ($(sync~spin) Running\u2026) while a companion test is executing.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.fastStaticDiscovery": {
@@ -459,6 +459,21 @@
             ],
             "markdownDescription": "Actions shown for a test when `codeLens.layout` is `custom`. `cases` appears only for collapsed generated/data-driven cases.",
             "scope": "resource"
+          },
+          "playwrightCodeLensRunner.discovery.watchPatterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Additional workspace-relative globs for imported fixtures, helpers, or generated-case data. Matching saves, creates, changes, and deletes invalidate all CLI discovery caches and refresh inventories without repeating CLI version probes. Keep patterns narrow to avoid excessive discovery.",
+            "scope": "resource"
+          },
+          "playwrightCodeLensRunner.codeLens.allowUnverifiedTests": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Allow provisional actions for unbound test/it/describe calls in files without a Playwright config or recognized Playwright/fixture imports. Enable for custom wrappers; companion commands still verify CLI ownership before execution.",
+            "scope": "resource"
           }
         }
       }
@@ -535,7 +550,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.more",
-        "title": "More Playwright Actions…",
+        "title": "More Playwright Actions\u2026",
         "category": "Playwright"
       },
       {
@@ -576,7 +591,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.tagActions",
-        "title": "Tag Actions…",
+        "title": "Tag Actions\u2026",
         "category": "Playwright"
       },
       {
@@ -623,7 +638,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.openUiProfile",
-        "title": "Open Playwright UI Profile…",
+        "title": "Open Playwright UI Profile\u2026",
         "category": "Playwright",
         "icon": "$(remote)"
       },
@@ -659,7 +674,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.flakeLabWithSize",
-        "title": "Run Flake Lab with Size…",
+        "title": "Run Flake Lab with Size\u2026",
         "category": "Playwright",
         "icon": "$(beaker)"
       },
@@ -954,6 +969,7 @@
     "typescript-eslint": "^8.71.0"
   },
   "dependencies": {
-    "@babel/parser": "^8.0.4"
+    "@babel/parser": "^8.0.4",
+    "cross-spawn": "^7.0.6"
   }
 }

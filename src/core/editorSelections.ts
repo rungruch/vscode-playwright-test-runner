@@ -131,7 +131,7 @@ function appendTest(
 }
 
 function collapseSelections(selections: EditorTestSelection[]): EditorTestSelection[] {
-  const byLocation = new Map<string, EditorTestSelection>();
+  const byLocation = new Map<string, { selection: EditorTestSelection; paths?: Map<string, string[]> }>();
   for (const selection of selections) {
     const key = [
       selection.kind,
@@ -141,21 +141,21 @@ function collapseSelections(selections: EditorTestSelection[]): EditorTestSelect
     ].join('\0');
     const existing = byLocation.get(key);
     if (!existing) {
-      byLocation.set(key, selection);
+      byLocation.set(key, { selection });
       continue;
     }
-    mergeTitlePaths(existing, selection);
+    existing.paths ??= new Map((existing.selection.titlePath ? [existing.selection.titlePath] : [])
+      .map((titles) => [JSON.stringify(titles), titles]));
+    for (const titles of selection.titlePaths ?? (selection.titlePath ? [selection.titlePath] : [])) {
+      existing.paths.set(JSON.stringify(titles), titles);
+    }
   }
-  return [...byLocation.values()];
-}
-
-function mergeTitlePaths(target: EditorTestSelection, incoming: EditorTestSelection): void {
-  const paths = [
-    ...(target.titlePaths ?? (target.titlePath ? [target.titlePath] : [])),
-    ...(incoming.titlePaths ?? (incoming.titlePath ? [incoming.titlePath] : [])),
-  ];
-  const unique = new Map(paths.map((titles) => [titles.join('\0'), titles]));
-  target.titlePaths = [...unique.values()];
+  return [...byLocation.values()].map(({ selection, paths }) => {
+    if (paths) {
+      selection.titlePaths = [...paths.values()];
+    }
+    return selection;
+  });
 }
 
 function toPosition(line: number, column: number): { line: number; character: number } {

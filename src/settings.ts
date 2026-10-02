@@ -65,40 +65,25 @@ export class Settings {
     return this.configuration().get<string[]>('runOptions', []);
   }
 
-  /**
-   * Top-level browser preference for all Playwright runs (companion CLI, Flake Lab, Inspector).
-   * Also checks legacy `playwrightrunner.playwrightRunProject` if set to a supported browser.
-   */
+  /** Default browser preference; mode overrides are independent. */
   get browser(): BrowserPreference {
     const value = this.configuration().get<string>('browser', 'config');
-    if (isBrowserPreference(value) && value !== 'config') {
-      return value;
-    }
-    const legacy = vscode.workspace.getConfiguration('playwrightrunner', this.resource).get<string>('playwrightRunProject', '');
-    if (isBrowserPreference(legacy) && legacy !== 'config') {
-      return legacy;
-    }
-    return 'config';
+    return value && isBrowserPreference(value) ? value : 'config';
+  }
+
+  private modeBrowser(key: string): BrowserPreference {
+    const configuration = this.configuration();
+    const inspected = configuration.inspect<string>(key);
+    const explicit = inspected && [inspected.workspaceFolderLanguageValue, inspected.workspaceLanguageValue,
+      inspected.globalLanguageValue, inspected.workspaceFolderValue, inspected.workspaceValue, inspected.globalValue]
+      .some((value) => value !== undefined);
+    const value = explicit ? configuration.get<string>(key) : this.browser;
+    return value && isBrowserPreference(value) ? value : 'config';
   }
 
   /** Browser/project override applied to Playwright Inspector commands. */
   get inspectorBrowser(): InspectorBrowser {
-    const value = this.configuration().get<string>('inspector.browser', 'config');
-    if (isBrowserPreference(value) && value !== 'config') {
-      return value;
-    }
-    if (this.browser !== 'config') {
-      return this.browser;
-    }
-    const companion = this.configuration().get<string>('companion.browser', 'config');
-    if (isBrowserPreference(companion) && companion !== 'config') {
-      return companion;
-    }
-    const flake = this.configuration().get<string>('flakeLab.browser', 'config');
-    if (isBrowserPreference(flake) && flake !== 'config') {
-      return flake;
-    }
-    return 'config';
+    return this.modeBrowser('inspector.browser');
   }
 
   get companionShowCliOutput(): CompanionShowCliOutput {
@@ -107,41 +92,20 @@ export class Settings {
   }
 
   get companionBrowser(): BrowserPreference {
-    const value = this.configuration().get<string>('companion.browser', 'config');
-    if (isBrowserPreference(value) && value !== 'config') {
-      return value;
-    }
-    if (this.browser !== 'config') {
-      return this.browser;
-    }
-    const flake = this.configuration().get<string>('flakeLab.browser', 'config');
-    if (isBrowserPreference(flake) && flake !== 'config') {
-      return flake;
-    }
-    const inspector = this.configuration().get<string>('inspector.browser', 'config');
-    if (isBrowserPreference(inspector) && inspector !== 'config') {
-      return inspector;
-    }
-    return 'config';
+    return this.modeBrowser('companion.browser');
   }
 
   get flakeLabBrowser(): BrowserPreference {
-    const value = this.configuration().get<string>('flakeLab.browser', 'config');
-    if (isBrowserPreference(value) && value !== 'config') {
-      return value;
-    }
-    if (this.browser !== 'config') {
-      return this.browser;
-    }
-    const companion = this.configuration().get<string>('companion.browser', 'config');
-    if (isBrowserPreference(companion) && companion !== 'config') {
-      return companion;
-    }
-    const inspector = this.configuration().get<string>('inspector.browser', 'config');
-    if (isBrowserPreference(inspector) && inspector !== 'config') {
-      return inspector;
-    }
-    return 'config';
+    return this.modeBrowser('flakeLab.browser');
+  }
+
+  get discoveryWatchPatterns(): string[] {
+    return this.configuration().get<string[]>('discovery.watchPatterns', [])
+      .filter((pattern) => typeof pattern === 'string' && pattern.trim().length > 0);
+  }
+
+  get codeLensAllowUnverifiedTests(): boolean {
+    return this.configuration().get<boolean>('codeLens.allowUnverifiedTests', false);
   }
 
   get flakeLabSize(): FlakeLabSizePreset {

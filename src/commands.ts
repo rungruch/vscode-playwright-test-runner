@@ -20,7 +20,8 @@ import {
 import { cliSelectionForEditor } from './core/selectionArguments';
 import { prepareSelection } from './core/selectionPreparation';
 import { legacyTitle } from './core/testIdentity';
-import { environmentForCli } from './core/cliResolution';
+import { groupFailedReruns } from './core/failedReruns';
+import { createCliTerminal } from './terminal';
 import { quoteForTerminal } from './core/terminalQuote';
 import { supportsFailOnFlakyTests } from './core/version';
 import { DiscoveryService } from './discoveryService';
@@ -90,7 +91,7 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.openArtifact', (artifact: ArtifactRecord) => openArtifactCommand(deps, artifact));
   register('playwrightCodeLensRunner.revealArtifact', (artifact: ArtifactRecord) => revealArtifactCommand(artifact));
   register('playwrightCodeLensRunner.openFailure', (failure: CompanionFailure) => openFailureCommand(failure));
-  register('playwrightCodeLensRunner.showCompanionOutput', () => deps.runner.showOutput());
+  register('playwrightCodeLensRunner.showCompanionOutput', (runId?: string) => deps.runner.showOutput(runId));
   register('playwrightCodeLensRunner.openMicrosoftTesting', () => vscode.commands.executeCommand('workbench.view.extension.test'));
 
   register('playwrightCodeLensRunner.stopInteractiveSession', () => deps.sessions.stop());
@@ -763,6 +764,8 @@ async function rerunFailedCommand(deps: CommandDeps, arg?: unknown): Promise<voi
   await deps.discovery.refreshSavedFiles(savedFiles);
   const verifiedFailures: CompanionFailure[] = [];
   const preparedSelections: EditorTestSelection[] = [];
+  const rerunDeclarations: EditorTestSelection[] = [];
+  const indexedFiles = new Set<string>();
   let missing = 0;
   const unique = new Map(latest.failures.map((failure) => [JSON.stringify([failure.file, failure.line, failure.column, failure.titlePath ?? failure.title]), failure]));
   for (const failure of unique.values()) {
@@ -790,7 +793,14 @@ async function rerunFailedCommand(deps: CommandDeps, arg?: unknown): Promise<voi
       openDocument: () => vscode.workspace.openTextDocument(vscode.Uri.parse(requested.uri)),
       afterSave: () => deps.discovery.refreshSavedFiles([requested.file]),
       resolveTarget: async () => target,
-      discover: (target) => deps.discovery.discoverForFile(target, requested.file),
+      discover: async (target) => {
+        const model = await deps.discovery.discoverForFile(target, requested.file);
+        if (model && !indexedFiles.has(requested.file)) {
+          indexedFiles.add(requested.file);
+          rerunDeclarations.push(...editorSelectionsForFile(model, requested.file, requested.uri));
+        }
+        return model;
+      },
       revision: (target) => deps.discovery.revisionFor(target.id),
     });
     if (prepared.error !== undefined) {
@@ -812,7 +822,9 @@ async function rerunFailedCommand(deps: CommandDeps, arg?: unknown): Promise<voi
   if (missing > 0) {
     void vscode.window.showInformationMessage(`Skipped ${missing} previously failed test(s) whose file or declaration is no longer available.`);
   }
-  const selection = failedSelection({ ...latest, failures: verifiedFailures });
+  const rootDir = deps.discovery.cachedModelForFile(target.id, verifiedFailures.find((failure) => failure.file)?.file ?? '')?.rootDir
+    ?? deps.discovery.cachedModel(target.id)?.rootDir ?? target.configDir;
+  const selection = failedSelection({ ...latest, failures: verifiedFailures }, rootDir);
   const projects = latest.projects.length > 0 ? latest.projects : await deps.projects.getProjects(target);
   const args = [
     ...buildCompanionTestArguments(selection, {
@@ -831,12 +843,26 @@ async function rerunFailedCommand(deps: CommandDeps, arg?: unknown): Promise<voi
     titlePath: f.titlePath,
     status: 'pending' as const,
   }));
+  const { groups, ambiguous } = groupFailedReruns(verifiedFailures, rerunDeclarations);
+  if (ambiguous) {
+    void vscode.window.showInformationMessage(`Cannot isolate failed generated case "${ambiguous.title}": another case has the same flattened title and source location. Run the declaration or narrow its title in the test source.`);
+    return;
+  }
+  const testForFailure = new Map(verifiedFailures.map((failure, index) => [failure, initialTests[index]]));
+  const batches = groups.map((failures) => {
+    const selection = failedSelection({ ...latest, failures }, rootDir);
+    return { selection, args: [...buildCompanionTestArguments(selection, { configFile: target.configFile,
+      cwd: target.cwd, projects }), ...target.runOptions],
+      initialTests: failures.map(failure => testForFailure.get(failure)!) };
+  });
   if (preparedSelections.some((selection) => !selectionStillCurrent(deps, target, selection))) {
     return;
   }
   await dispatchManagedRun({
     runsEnabled: settingsFor(target).sidebarRunsEnabled,
-    runInTerminal: () => runInTerminal(target, 'Playwright Rerun Failed', args),
+    runInTerminal: () => {
+      for (const batch of batches) { runInTerminal(target, 'Playwright Rerun Failed', batch.args); }
+    },
     runManaged: async () => {
       void focusCompanionFor(target);
       return vscode.window.withProgress(
@@ -855,6 +881,7 @@ async function rerunFailedCommand(deps: CommandDeps, arg?: unknown): Promise<voi
           selection,
           projects,
           initialTests,
+          batches,
         }, token),
       );
     },
@@ -901,7 +928,7 @@ async function mergeBlobReportsCommand(deps: CommandDeps): Promise<void> {
     }
     return;
   }
-  const target = await targetById(deps, blob.targetId);
+  const target = await targetForArtifact(deps, blob);
   if (!target) {
     return;
   }
@@ -910,7 +937,7 @@ async function mergeBlobReportsCommand(deps: CommandDeps): Promise<void> {
 }
 
 async function openArtifactCommand(deps: CommandDeps, artifact: ArtifactRecord): Promise<void> {
-  const target = await targetById(deps, artifact.targetId);
+  const target = await targetForArtifact(deps, artifact);
   if (!target) {
     return;
   }
@@ -1099,17 +1126,31 @@ async function pickArtifact(artifacts: ArtifactRecord[], title: string): Promise
   return picked?.artifact;
 }
 
-function failedSelection(run: CompanionRunSummary): import('./core/runArguments').RunSelection {
+async function targetForArtifact(deps: CommandDeps, artifact: ArtifactRecord): Promise<RunTarget | undefined> {
+  const ids = artifact.targetIds ?? [artifact.targetId];
+  const targets = (await currentTargets(deps)).filter((target) => ids.includes(target.id));
+  if (targets.length <= 1) { return targets[0]; }
+  const picked = await vscode.window.showQuickPick(targets.map((target) => ({
+    label: targetLabel(target), description: target.configFile ?? target.cwd, target,
+  })), { title: 'Choose CLI config for this shared artifact' });
+  return picked?.target;
+}
+
+function failedSelection(run: CompanionRunSummary, rootDir?: string): import('./core/runArguments').RunSelection {
   const files = [...new Set(run.failures.flatMap((failure) => failure.file ? [failure.file] : []))];
   const effectiveFiles = files.length > 0 ? files : run.selection.files;
   const filters = run.failures.flatMap((failure) => (
     failure.file && failure.titlePath && failure.titlePath.length > 0
-      ? [fullTitleFilter(failure.titlePath, failure.file)]
+      ? [fullTitleFilter(failure.titlePath, failure.file, rootDir)]
       : []
   ));
   return {
     files: effectiveFiles,
     titleFilters: filters.length > 0 ? filters : run.selection.titleFilters,
+    line: files.length === 0 ? run.selection.line : undefined,
+    locations: run.failures.every((failure) => failure.file && failure.line)
+      ? run.failures.map((failure) => ({ file: failure.file!, line: failure.line!, column: failure.column }))
+      : files.length === 0 ? run.selection.locations : undefined,
   };
 }
 
@@ -1191,12 +1232,7 @@ async function recordTestCommand(deps: CommandDeps, folder: vscode.Uri | undefin
 }
 
 function runInTerminal(target: RunTarget, name: string, args: string[]): void {
-  const terminal = vscode.window.createTerminal({
-    name,
-    cwd: target.cwd,
-    env: environmentForCli(target.cli, target.env),
-  });
-  terminal.sendText(quoteForTerminal(target.cli.executable, [...target.cli.argsPrefix, ...args]));
+  const terminal = createCliTerminal(target, name, args);
   terminal.show(true);
 }
 

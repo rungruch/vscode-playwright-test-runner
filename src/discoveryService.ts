@@ -24,6 +24,7 @@ const DISCOVERY_CONFIGURATION_KEYS = [
   'workingDirectory',
   'runOptions',
   'environment',
+  'discovery.watchPatterns',
 ] as const;
 const TEST_DISCOVERY_TIMEOUT_MS = 60_000;
 const CLI_PROBE_TIMEOUT_SECONDS = 15;
@@ -117,8 +118,15 @@ export class DiscoveryService implements vscode.Disposable {
           { scheme: 'file', pattern: new Settings(doc.uri).codeLensPattern },
           doc,
         ) > 0;
-        if (configChanged || isTestFile(doc.uri.fsPath) || configuredTest) {
-          this.scheduleRefresh(doc.uri.fsPath, configChanged);
+        const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
+        const dependencyChanged = folder && new Settings(doc.uri).discoveryWatchPatterns.some((pattern) =>
+          vscode.languages.match({ scheme: 'file', pattern: new vscode.RelativePattern(folder, pattern) }, doc) > 0);
+        if (configChanged) {
+          this.scheduleRefresh(doc.uri.fsPath, true, Boolean(dependencyChanged));
+        } else if (dependencyChanged) {
+          this.scheduleRefresh(doc.uri.fsPath, false, true);
+        } else if (isTestFile(doc.uri.fsPath) || configuredTest) {
+          this.scheduleRefresh(doc.uri.fsPath);
         }
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
@@ -127,7 +135,8 @@ export class DiscoveryService implements vscode.Disposable {
         this.queueRefreshAll();
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
-        if (event.affectsConfiguration(`${SETTINGS_NAMESPACE}.codeLens.pattern`)) {
+        if (event.affectsConfiguration(`${SETTINGS_NAMESPACE}.codeLens.pattern`)
+          || event.affectsConfiguration(`${SETTINGS_NAMESPACE}.discovery.watchPatterns`)) {
           this.rebuildTestWatchers();
         }
         if (!DISCOVERY_CONFIGURATION_KEYS.some((key) => event.affectsConfiguration(`${SETTINGS_NAMESPACE}.${key}`))) {
@@ -456,7 +465,7 @@ export class DiscoveryService implements vscode.Disposable {
     });
     for (const target of affected) {
       this.invalidateTarget(target.id, false, rescanTargets);
-      this.emitter.fire({ target, scopeFile: rescanTargets ? undefined : fsPath });
+      this.emitter.fire({ target, scopeFile: rescanTargets || broad ? undefined : fsPath });
     }
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
@@ -485,6 +494,12 @@ export class DiscoveryService implements vscode.Disposable {
       return;
     }
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      for (const pattern of new Settings(folder.uri).discoveryWatchPatterns) {
+        const dependencyWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(folder, pattern));
+        const dependencyChanged = (uri: vscode.Uri) => this.scheduleRefresh(uri.fsPath, false, true);
+        this.testWatcherDisposables.push(dependencyWatcher, dependencyWatcher.onDidCreate(dependencyChanged),
+          dependencyWatcher.onDidChange(dependencyChanged), dependencyWatcher.onDidDelete(dependencyChanged));
+      }
       const watcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(folder, new Settings(folder.uri).codeLensPattern),
       );
@@ -556,7 +571,7 @@ export class DiscoveryService implements vscode.Disposable {
       }
     }
     await Promise.all(targets.map(async (target) => {
-      if (changes.some((change) => change.rescan && (change.targetIds?.includes(target.id) || change.path === target.configFile))) {
+      if (changes.some((change) => change.broad || change.rescan && (change.targetIds?.includes(target.id) || change.path === target.configFile))) {
         await this.discover(target);
         return;
       }

@@ -10,6 +10,8 @@ export interface RunSelection {
   titleFilters: string[];
   /** Optional 1-based source line for generated tests sharing a declaration. */
   line?: number;
+  /** Exact source locations, used when rerunning failures from multiple declarations. */
+  locations?: Array<{ file: string; line: number; column?: number }>;
 }
 
 export interface UiArgumentOptions {
@@ -60,8 +62,8 @@ const TITLE_SEPARATOR = '\\s+(?:›\\s+)?(?:@\\S+\\s+)*(?:›\\s+)?';
  * Test filter that tolerates Playwright's project/file prefix, title-path
  * separators, and tags appended after the test title.
  */
-export function fullTitleFilter(titlePath: string | readonly string[], file: string): string {
-  return `${filterTitlePath(titlePath, file)}(?:\\s+@\\S+)*$`;
+export function fullTitleFilter(titlePath: string | readonly string[], file: string, rootDir?: string): string {
+  return `${filterTitlePath(titlePath, file, rootDir)}(?:\\s+@\\S+)*$`;
 }
 
 /** Suite filter that tolerates prefixes/separators and includes descendants. */
@@ -69,7 +71,7 @@ export function suiteTitleFilter(titlePath: string | readonly string[], file: st
   return `${filterTitlePath(titlePath, file)}(?:$|${TITLE_SEPARATOR})`;
 }
 
-function filterTitlePath(titlePath: string | readonly string[], file: string): string {
+function filterTitlePath(titlePath: string | readonly string[], file: string, rootDir?: string): string {
   const rawTitles = typeof titlePath === 'string' ? [titlePath] : titlePath;
   const portableFile = file.replaceAll('\\', '/');
   const fileName = portableFile.slice(portableFile.lastIndexOf('/') + 1);
@@ -83,7 +85,8 @@ function filterTitlePath(titlePath: string | readonly string[], file: string): s
   };
   const cleanTitles = rawTitles.filter((t) => !isFileTitle(t));
   const titles = cleanTitles.length > 0 ? cleanTitles : rawTitles.filter((t) => t.length > 0);
-  const prefix = `(?:^|[\\s/\\\\])${escapeRegExp(fileName)}${TITLE_SEPARATOR}`;
+  const fileTitle = rootDir ? path.relative(rootDir, file).replaceAll('\\', '/') : fileName;
+  const prefix = `(?:^|[\\s/\\\\])${escapeRegExp(fileTitle).replaceAll('/', '[/\\\\]')}${TITLE_SEPARATOR}`;
   return `${prefix}${titles.map(escapeRegExp).join(TITLE_SEPARATOR)}`;
 }
 
@@ -142,9 +145,14 @@ export function buildCompanionTestArguments(selection: RunSelection, options: Ui
   if (options.configFile) {
     args.push('--config', options.configFile);
   }
-  for (const file of selection.files) {
+  for (const file of selection.locations ? [] : selection.files) {
     const filter = playwrightFileFilter(file, options.cwd);
     args.push(selection.line ? `${filter}:${selection.line}` : filter);
+  }
+  for (const location of selection.locations ?? []) {
+    // Match the complete native path, including both Windows separator forms.
+    const filter = `^${escapeRegExp(location.file.replaceAll('\\', '/')).replaceAll('/', '[/\\\\]')}$`;
+    args.push(`${filter}:${location.line}${location.column ? `:${location.column}` : ''}`);
   }
   if (options.browser) {
     args.push(`--browser=${options.browser}`);
@@ -183,9 +191,10 @@ export function buildTagArguments(
   tag: string,
   options: UiArgumentOptions,
 ): string[] {
+  const filter = `(?:^|\\s)${escapeRegExp(tag)}(?=\\s|$)`;
   return mode === 'ui'
-    ? buildUiArguments({ files: [], titleFilters: [tag] }, options)
-    : buildDebugArguments({ files: [], titleFilters: [tag] }, options);
+    ? buildUiArguments({ files: [], titleFilters: [filter] }, options)
+    : buildDebugArguments({ files: [], titleFilters: [filter] }, options);
 }
 
 function buildInteractiveArguments(

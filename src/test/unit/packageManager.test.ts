@@ -91,10 +91,13 @@ suite('cliResolution', () => {
     assert.deepStrictEqual(packageManagerCommand('npm').argsPrefix, ['--no-install', 'playwright']);
     assert.deepStrictEqual(packageManagerCommand('pnpm').argsPrefix, ['exec', 'playwright']);
     assert.deepStrictEqual(packageManagerCommand('yarn').argsPrefix, ['playwright']);
-    assert.deepStrictEqual(packageManagerCommand('bun').argsPrefix, ['--no-install', 'playwright']);
+    assert.deepStrictEqual(packageManagerCommand('bun').argsPrefix,
+      process.platform === 'win32' ? ['x', '--no-install', 'playwright'] : ['--no-install', 'playwright']);
   });
 
   test('windows executables use .cmd shims', () => {
+    assert.deepStrictEqual(packageManagerCommand('bun', 'win32'), { executable: 'bun.exe',
+      argsPrefix: ['x', '--no-install', 'playwright'], source: 'package-manager' });
     if (process.platform === 'win32') {
       assert.strictEqual(packageManagerCommand('npm').executable, 'npx.cmd');
       assert.strictEqual(packageManagerCommand('pnpm').executable, 'pnpm.cmd');

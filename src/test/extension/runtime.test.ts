@@ -8,6 +8,9 @@ import { CompanionCliRunner } from '../../companionRunner';
 import { CompanionCliRunRequest, CompanionRunSummary } from '../../core/companionTypes';
 import { DiscoveryService } from '../../discoveryService';
 import { RunTarget } from '../../runTarget';
+import { Settings } from '../../settings';
+import { ArtifactService } from '../../artifactService';
+import { createCliTerminal } from '../../terminal';
 
 suite('responsive editor and concurrent companion runs', () => {
   const delayedDisposals: vscode.Disposable[] = [];
@@ -15,6 +18,110 @@ suite('responsive editor and concurrent companion runs', () => {
     for (const disposable of delayedDisposals) {
       disposable.dispose();
     }
+  });
+  test('launches an integrated CLI terminal with literal argv, independent of the default shell', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'playwright terminal '));
+    const output = path.join(directory, 'argv.json');
+    const extension = vscode.extensions.getExtension('rungruch.playwright-codelens-runner');
+    assert.ok(extension);
+    const values = ['space path', 'quote"here', "it's", '$x;&|', '%USERPROFILE%', 'end\\'];
+    const terminal = createCliTerminal(fakeTarget(directory), 'Playwright argv regression', [
+      '-e', 'require("fs").writeFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)))', '--', output, ...values,
+    ], path.join(extension.extensionPath, 'dist', 'terminalLauncher.cjs'));
+    try {
+      let content: string | undefined;
+      const deadline = Date.now() + 10_000;
+      while (!content && Date.now() < deadline) {
+        content = await fs.readFile(output, 'utf8').catch(() => undefined);
+        if (!content) { await new Promise(resolve => setTimeout(resolve, 50)); }
+      }
+      assert.ok(content, 'terminal relay actually executes the CLI');
+      assert.deepStrictEqual(JSON.parse(content), values);
+    } finally {
+      terminal.dispose();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+  test('keeps browser modes independent and lets explicit config opt out of the default', async () => {
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner');
+    const keys = ['browser', 'inspector.browser', 'companion.browser', 'flakeLab.browser'];
+    const saved = keys.map((key) => configuration.inspect<string>(key)?.globalValue);
+    const settings = new Settings();
+    try {
+      for (const key of keys) { await configuration.update(key, undefined, vscode.ConfigurationTarget.Global); }
+      await configuration.update('inspector.browser', 'firefox', vscode.ConfigurationTarget.Global);
+      assert.deepStrictEqual([settings.inspectorBrowser, settings.companionBrowser, settings.flakeLabBrowser], ['firefox', 'config', 'config']);
+      await configuration.update('browser', 'chromium', vscode.ConfigurationTarget.Global);
+      assert.deepStrictEqual([settings.inspectorBrowser, settings.companionBrowser, settings.flakeLabBrowser], ['firefox', 'chromium', 'chromium']);
+      await configuration.update('inspector.browser', 'config', vscode.ConfigurationTarget.Global);
+      await configuration.update('flakeLab.browser', 'webkit', vscode.ConfigurationTarget.Global);
+      assert.deepStrictEqual([settings.inspectorBrowser, settings.companionBrowser, settings.flakeLabBrowser], ['config', 'chromium', 'webkit']);
+      await configuration.update('companion.browser', 'config', vscode.ConfigurationTarget.Global);
+      assert.strictEqual(settings.companionBrowser, 'config');
+    } finally {
+      for (const [index, key] of keys.entries()) { await configuration.update(key, saved[index], vscode.ConfigurationTarget.Global); }
+    }
+  });
+
+  test('coalesces artifact scans and rejects an older scan finishing last', async () => {
+    let calls = 0;
+    let releaseOld!: () => void;
+    const old = new Promise<[]>(resolve => { releaseOld = () => resolve([]); });
+    const service = new ArtifactService(async (roots) => {
+      calls++;
+      if (roots.some(root => root.targetIds.includes('old'))) { return old; }
+      return [{ kind: 'report', path: '/new/report', label: 'New', modifiedAt: 1, targetId: 'new' }];
+    });
+    const oldTarget = { ...fakeTarget('/old'), id: 'old' };
+    const newTarget = { ...fakeTarget('/new'), id: 'new' };
+    try {
+      const first = service.scan([oldTarget]);
+      const same = service.scan([oldTarget]);
+      await service.scan([newTarget]);
+      releaseOld();
+      await Promise.all([first, same]);
+      assert.strictEqual(calls, 2);
+      assert.strictEqual(service.artifacts[0].targetId, 'new');
+    } finally { service.dispose(); }
+  });
+
+  test('shows only the selected historical output, including after restoration', async () => {
+    const state = new Map<string, unknown>();
+    const context = { asAbsolutePath: (file: string) => path.resolve(file),
+      workspaceState: { get: (key: string) => state.get(key), update: async (key: string, value: unknown) => { state.set(key, value); } } } as unknown as vscode.ExtensionContext;
+    const runner = new CompanionCliRunner(context);
+    const target = fakeTarget(os.tmpdir());
+    const request = syntheticRequest(target, 0, 1);
+    const first = await runner.run(target, { ...request, args: ['-e', "process.stdout.write('output-old')", '--'] });
+    await runner.run(target, { ...request, startedAt: 2, args: ['-e', "process.stdout.write('output-new')", '--'] });
+    runner.dispose();
+    const restored = new CompanionCliRunner(context);
+    try {
+      await restored.showOutput(first.id);
+      const document = vscode.window.activeTextEditor?.document;
+      assert.ok(document);
+      assert.ok(document.uri.scheme.startsWith('playwright-run-output-'));
+      assert.ok(document.getText().includes('output-old'));
+      assert.ok(!document.getText().includes('output-new'));
+      assert.ok(document.getText().includes('Retained output tail'));
+    } finally { restored.dispose(); }
+  });
+
+  test('executes exact scopes as one managed run without losing earlier batch results', async () => {
+    const runner = new CompanionCliRunner({ asAbsolutePath: (file: string) => path.resolve(file),
+      workspaceState: { get: () => undefined, update: async () => undefined } } as unknown as vscode.ExtensionContext);
+    const target = fakeTarget(os.tmpdir());
+    const first = syntheticRequest(target, 20, 1);
+    const second = { ...first, args: first.args.map(arg => arg.replaceAll('one', 'two')) };
+    try {
+      const final = await runner.run(target, { ...first, kind: 'rerun-failed', batches: [first, second].map(request => ({
+        args: request.args, selection: request.selection, initialTests: [],
+      })) });
+      assert.strictEqual(final.passed, 2);
+      assert.strictEqual(final.total, 2);
+      assert.deepStrictEqual(final.tests?.map(test => test.title), ['one', 'two']);
+      assert.strictEqual(runner.runs.length, 1);
+    } finally { runner.dispose(); }
   });
   test('refreshes file content without another version probe and isolates cancelled callers', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codelens-discovery-'));
@@ -69,7 +176,7 @@ suite('responsive editor and concurrent companion runs', () => {
   test('renders and reuses source actions while ownership is blocked', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'codelens-static-'));
     const uri = vscode.Uri.file(path.join(directory, 'cold.spec.ts'));
-    await fs.writeFile(uri.fsPath, "test('cold test', async () => {});\n");
+    await fs.writeFile(uri.fsPath, "import { test } from '@playwright/test';\ntest('cold test', async () => {});\n");
     const document = await vscode.workspace.openTextDocument(uri);
     const event = new vscode.EventEmitter<never>();
     let release!: () => void;

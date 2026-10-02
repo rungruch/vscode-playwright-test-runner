@@ -141,4 +141,31 @@ suite('astParser', () => {
     assert.strictEqual(model.files[0].suites[0].tests.length, 2);
     assert.strictEqual(model.files[0].suites.reduce((count, suite) => count + suite.tests.length, 0), 200);
   });
+
+  test('recognizes aliased imports, namespace calls, extended fixtures and merged fixtures', () => {
+    const model = parseTestFileAst(`
+      import { test as base, mergeTests as merge } from '@playwright/test';
+      import { test as scenario } from './fixtures';
+      import * as pw from '@playwright/test';
+      const { test: commonJs } = require('@playwright/test');
+      const extended = base.extend({});
+      const combined = merge(base, scenario);
+      scenario.describe('fixtures', () => { scenario('alias', () => {}); });
+      extended('extended', () => {});
+      combined('merged', () => {});
+      pw.test('namespace', () => {});
+      commonJs('commonjs', () => {});
+    `, '/workspace/alias.spec.ts', { allowUnboundTests: false });
+    assert.deepStrictEqual(model.files[0].tests.map((test) => test.title), ['extended', 'merged', 'namespace', 'commonjs']);
+    assert.strictEqual(model.files[0].suites[0].tests[0].title, 'alias');
+  });
+
+  test('excludes other frameworks and requires evidence when unbound discovery is disabled', () => {
+    const file = '/workspace/jest.spec.ts';
+    assert.deepStrictEqual(parseTestFileAst("import { test } from '@jest/globals'; test('jest', () => {});", file).files, []);
+    assert.deepStrictEqual(parseTestFileAst("test('unknown', () => {});", file, { allowUnboundTests: false }).files, []);
+    assert.strictEqual(parseTestFileAst("test('custom', () => {});", file).files[0].tests.length, 1);
+    const mixed = parseTestFileAst("import { test as jestTest } from '@jest/globals'; import { test as pwTest } from '@playwright/test'; jestTest('jest', () => {}); pwTest('playwright', () => {});", file);
+    assert.deepStrictEqual(mixed.files[0].tests.map((test) => test.title), ['playwright']);
+  });
 });

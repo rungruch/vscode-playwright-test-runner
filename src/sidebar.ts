@@ -187,6 +187,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
         type: 'action',
         label: 'View CLI Output',
         command: 'playwrightCodeLensRunner.showCompanionOutput',
+        args: [run.id],
         icon: 'output',
       });
       if (run.tests && run.tests.length > 0) {

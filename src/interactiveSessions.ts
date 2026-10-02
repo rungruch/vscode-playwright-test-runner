@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
-import { environmentForCli } from './core/cliResolution';
 import { SingleActiveSession } from './core/singleActiveSession';
-import { quoteForTerminal } from './core/terminalQuote';
+import { createCliTerminal } from './terminal';
 import { RunTarget } from './runTarget';
 
 export interface InteractiveSession {
@@ -33,11 +32,7 @@ export class InteractiveSessionManager implements vscode.Disposable {
 
   launch(target: RunTarget, key: string, name: string, args: string[]): void {
     this.active.replace(() => {
-      const terminal = vscode.window.createTerminal({
-        name,
-        cwd: target.cwd,
-        env: environmentForCli(target.cli, target.env),
-      });
+      const terminal = createCliTerminal(target, name, args);
       return {
         handle: terminal,
         value: { key, name, targetId: target.id, startedAt: Date.now() },
@@ -48,7 +43,6 @@ export class InteractiveSessionManager implements vscode.Disposable {
     if (!terminal) {
       return;
     }
-    terminal.sendText(quoteForTerminal(target.cli.executable, [...target.cli.argsPrefix, ...args]));
     terminal.show(true);
   }
 

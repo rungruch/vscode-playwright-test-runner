@@ -16,6 +16,34 @@ import {
 } from '../../core/runArguments';
 
 suite('runArguments', () => {
+  test('matches complete literal tags, including punctuation, without matching longer tags', () => {
+    for (const tag of ['@smoke', '@release.1', '@auth-api']) {
+      const args = buildTagArguments('ui', tag, { cwd: '/ws' });
+      const regex = new RegExp(args[args.indexOf('--grep') + 1]);
+      assert.ok(regex.test(`file.spec.ts suite test ${tag} @other`));
+      assert.ok(!regex.test(`file.spec.ts suite test ${tag}-long`));
+      assert.ok(!regex.test(`file.spec.ts suite test ${tag.replace('.', 'X')}-long`));
+    }
+    const args = buildTagArguments('debug', '@release.1', { cwd: '/ws' });
+    assert.ok(!new RegExp(args.at(-1)!).test('test @releaseX1'));
+  });
+
+  test('retains per-file lines and columns and qualifies titles by their full relative file', () => {
+    const args = buildCompanionTestArguments({ files: ['/ws/a/same.spec.ts', '/ws/b/same.spec.ts'],
+      locations: [{ file: '/ws/a/same.spec.ts', line: 4, column: 3 }, { file: '/ws/b/same.spec.ts', line: 9 }],
+      titleFilters: [fullTitleFilter(['foo', 'bar'], '/ws/a/same.spec.ts', '/ws')] }, { cwd: '/ws' });
+    assert.strictEqual(args[0], 'test');
+    assert.ok(args[1].endsWith(':4:3'));
+    assert.ok(args[2].endsWith(':9'));
+    const fileRegex = new RegExp(args[1].slice(0, -4));
+    assert.ok(fileRegex.test('/ws/a/same.spec.ts'));
+    assert.ok(fileRegex.test('\\ws\\a\\same.spec.ts'));
+    assert.ok(!fileRegex.test('/other/ws/a/same.spec.ts'));
+    assert.ok(!fileRegex.test('/ws/a/same.spec.ts.backup'));
+    const regex = new RegExp(args.at(-1)!);
+    assert.ok(regex.test('chromium a/same.spec.ts foo bar'));
+    assert.ok(!regex.test('chromium b/same.spec.ts foo bar'));
+  });
   test('escapes regex metacharacters', () => {
     assert.strictEqual(escapeRegExp('a.b(c)d[e]f$g^h*i+j?k\\l|m'), 'a\\.b\\(c\\)d\\[e\\]f\\$g\\^h\\*i\\+j\\?k\\\\l\\|m');
   });
@@ -302,11 +330,11 @@ suite('runArguments', () => {
     const options = { cwd: '/ws', projects: ['webkit'] };
     assert.deepStrictEqual(
       buildTagArguments('ui', '@smoke', options),
-      ['test', '--ui', '--project', 'webkit', '--grep', '@smoke'],
+      ['test', '--ui', '--project', 'webkit', '--grep', '(?:^|\\s)@smoke(?=\\s|$)'],
     );
     assert.deepStrictEqual(
       buildTagArguments('debug', '@auth-api', options),
-      ['test', '--debug', '--project', 'webkit', '--grep', '@auth-api'],
+      ['test', '--debug', '--project', 'webkit', '--grep', '(?:^|\\s)@auth-api(?=\\s|$)'],
     );
   });
 

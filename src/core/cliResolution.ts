@@ -36,7 +36,7 @@ export function environmentForCli(
   environment: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv {
   const result = { ...environment };
-  if (cli.source === 'local-install' && cli.executable === process.execPath) {
+  if (cli.executable === process.execPath) {
     result.ELECTRON_RUN_AS_NODE = '1';
   }
   return result;
@@ -66,15 +66,15 @@ export function resolveCli(options: CliResolutionOptions): CliCommand {
   return packageManagerCommand(detectPackageManager(options.cwd, options.workspaceFolder));
 }
 
-export function packageManagerCommand(manager: PackageManager): CliCommand {
-  const win = process.platform === 'win32';
+export function packageManagerCommand(manager: PackageManager, platform: NodeJS.Platform = process.platform): CliCommand {
+  const win = platform === 'win32';
   switch (manager) {
     case 'pnpm':
       return { executable: win ? 'pnpm.cmd' : 'pnpm', argsPrefix: ['exec', 'playwright'], source: 'package-manager' };
     case 'yarn':
       return { executable: win ? 'yarn.cmd' : 'yarn', argsPrefix: ['playwright'], source: 'package-manager' };
     case 'bun':
-      return { executable: win ? 'bunx.cmd' : 'bunx', argsPrefix: ['--no-install', 'playwright'], source: 'package-manager' };
+      return { executable: win ? 'bun.exe' : 'bunx', argsPrefix: win ? ['x', '--no-install', 'playwright'] : ['--no-install', 'playwright'], source: 'package-manager' };
     case 'npm':
     default:
       return { executable: win ? 'npx.cmd' : 'npx', argsPrefix: ['--no-install', 'playwright'], source: 'package-manager' };

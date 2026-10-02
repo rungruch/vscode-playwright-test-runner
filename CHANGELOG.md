@@ -1,5 +1,18 @@
 # Change Log
 
+## 4.1.0 - 2026-10-02
+
+- Keep Inspector, Companion Run, and Flake Lab browser overrides independent; an explicit `config` override opts out of the top-level default. Stop reading legacy browser settings.
+- Rerun failures with verified file, line, column, and title scopes. Batch ordinary declarations together and execute generated declaration scopes separately within one managed history entry. Detect generated cases that the CLI cannot distinguish safely.
+- Complete process-tree cancellation after the parent exits, and handle Windows package-manager shims with cross-spawn.
+- Launch Inspector, UI, report, trace, and codegen terminals through a bundled argv relay, independent of the user's terminal shell. Copied Windows commands use PowerShell syntax.
+- Collapse generated declarations in one pass and include this workload in `benchmark:core`.
+- Scan shared artifact roots once, retain all config owners, coalesce concurrent refreshes, and prevent stale scans from replacing newer results.
+- Add opt-in `discovery.watchPatterns` for imported fixtures, helpers, and case data, including create/change/delete refreshes.
+- Recognize Playwright and local fixture aliases, namespace imports, extended/merged fixtures, and CommonJS bindings. Avoid provisional actions for unrelated frameworks; custom unbound wrappers can opt in.
+- Open each historical run's retained CLI output in its own read-only document, including restored history.
+- Add regression tests and Linux, macOS, and Windows validation jobs.
+
 ## 4.0.0 - 2026-09-05
 
 - Rerun remaining failures when earlier failures were deleted or renamed, without widening an empty rerun to the original scope.

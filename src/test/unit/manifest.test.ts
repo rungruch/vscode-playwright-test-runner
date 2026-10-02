@@ -43,8 +43,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 4.0.0 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '4.0.0');
+  test('declares the 4.1.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '4.1.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });

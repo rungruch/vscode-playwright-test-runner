@@ -47,6 +47,7 @@ export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vsco
       }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration(`${SETTINGS_NAMESPACE}.codeLens`)) {
+          this.documents.clear();
           this.emitter.fire();
         }
       }),
@@ -89,6 +90,7 @@ export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vsco
       cached.staticModel ??= parseTestFileAst(document.getText(), document.uri.fsPath, {
         targetId: target.id,
         rootDir: target.configDir,
+        allowUnboundTests: Boolean(target.configFile) || settings.codeLensAllowUnverifiedTests,
       });
       model = cached.staticModel;
       source = 'ast';
@@ -96,6 +98,9 @@ export class PlaywrightCodeLensProvider implements vscode.CodeLensProvider, vsco
       model = await this.discovery.discoverForFile(target, document.uri.fsPath, token);
     }
     if (token.isCancellationRequested || document.version !== version) {
+      return [];
+    }
+    if (source === 'ast' && model?.files.length === 0) {
       return [];
     }
     if (settings.codeLensFastStaticDiscovery && !this.ownership.has(uri)) {

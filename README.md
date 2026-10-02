@@ -6,7 +6,7 @@
 
 Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
 
-Version 3.3 adds normal Companion Runs, real-time sidebar test execution tracking, replace-on-rerun UI/Inspector sessions, and an optional managed Runs dashboard while retaining companion Flake Lab runs, artifacts, advanced UI workflows, and configurable CodeLens actions.
+Version 4.1 improves exact failed-test reruns, process cleanup, Windows launches, generated-case performance, shared artifacts, and historical output. Imported fixture or data changes can refresh discovery through the new opt-in watch patterns.
 
 Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
 
@@ -65,6 +65,8 @@ Tag actions use discovered `@tags` and structured `--grep @tag` arguments for UI
 
 The **Playwright Artifacts** view scans only configured target directories and the local `playwright-report`, `blob-report`, and `test-results` roots by default. It ranks HTML reports, report ZIPs, traces, blob-report ZIPs, and test-result attachments newest-first. Open or reveal artifacts from the view, merge blob reports with `playwright merge-reports --reporter html`, and reopen the generated report.
 
+Configs sharing artifact roots share one scan. Opening a shared report or trace asks which CLI config to use. Each history row's **View CLI Output** opens that run's retained output tail (up to 24,000 characters) in a read-only document; **Show Companion Output** still opens the combined live output channel.
+
 Remote UI profiles add `--ui-host` and `--ui-port` safely as CLI arguments:
 
 ```json
@@ -118,6 +120,8 @@ Suite and test Inspector/UI actions combine that file filter with the declaratio
 
 ## Inspector browser
 
+The top-level `playwrightCodeLensRunner.browser` supplies the default for companion modes. Each mode's explicit browser setting overrides only that mode, including `config` to preserve config projects instead of the top-level override. An unset mode setting inherits the top-level default.
+
 Inspector follows the Playwright config and configured CLI projects by default. To force one browser only for **Inspect Test/Suite**, set:
 
 ```json
@@ -143,11 +147,17 @@ Microsoft's enabled configs and projects are private to the official extension a
 
 With `codeLens.fastStaticDiscovery` enabled (the default), CodeLens renders source-based actions before CLI ownership discovery finishes. Parsed declarations are cached by document version. Background CLI discovery supplies the verified config, projects, and generated cases; unsaved edits keep their current source positions. Disable this setting to wait for CLI verification before rendering actions.
 
+Static discovery recognizes aliases imported from `@playwright/test` or local fixture modules, namespace imports, and extended or merged fixtures. Imported Jest declarations are excluded. Files without a Playwright config or recognized imports require `codeLens.allowUnverifiedTests: true` for provisional unbound `test`/`it`/`describe` wrappers; companion execution still verifies CLI ownership.
+
 Companion Run, Flake Lab, Inspector, and scoped Playwright UI actions save the selected test document before verifying its declaration and launching. Failed-test reruns save their selected test files. If saving fails, the selection disappears, or the source changes during preparation, the action stops with a message to retry the current selection. Native Run and Debug remain owned by Microsoft Testing.
 
 The **CLI Config** file lens is also companion-only. Its initial target can be provisional. Background discovery resolves ownership noninteractively: it revalidates a remembered choice, otherwise selects a deterministic config whose Playwright discovery owns the file. Use **Select CLI Config for File** to choose another overlapping config and remember it for that file. Configs may own sibling directories or tests in another workspace root; they do not need to be ancestors of the test file.
 
 Saved and externally changed test files invalidate affected targets’ test data, retain CLI-version metadata, and refresh changed or visible files after a short debounce. Full inventories are rebuilt for explicit refreshes, config changes, or commands that need them. Known persisted or discovered owners are refreshed together, including sibling and cross-root layouts. File discovery retains open documents and up to 128 inactive entries per target; explicit Retry rechecks the CLI version.
+
+For imported fixtures, helpers, or generated-case data, set narrow workspace-relative `discovery.watchPatterns`, for example `["tests/fixtures/**/*.ts", "test-data/**/*.json"]`. Matching saves and external creates, changes, or deletes invalidate discovery and rebuild all config inventories after the debounce, retaining CLI version metadata. Patterns default to `[]` so large repositories control this extra work.
+
+Failed reruns preserve each verified source location and exact title. Ordinary declarations share one CLI scope; generated declarations use separate scopes within one managed run to keep each declaration's case filters local. Indistinguishable generated cases display a message explaining how to narrow the test source. With managed runs disabled, each scope opens a separate terminal. CLI terminals launch through a bundled argv relay; copied commands on Windows use PowerShell syntax.
 
 ## Commands
 
@@ -183,11 +193,16 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 | Setting | Purpose | Default |
 | --- | --- | --- |
 | `playwrightCodeLensRunner.configFiles` | Explicit discovery/CLI config paths; empty discovers conventional `playwright*.config.*` files | `[]` |
+| `playwrightCodeLensRunner.discovery.watchPatterns` | Additional imported helper, fixture, or data globs that rebuild inventories | `[]` |
+| `playwrightCodeLensRunner.codeLens.allowUnverifiedTests` | Provisional unbound wrappers without config/import evidence | `false` |
 | `playwrightCodeLensRunner.cli.executable` | Explicit CLI executable such as `npx`, `pnpm`, or a local binary | automatic |
 | `playwrightCodeLensRunner.cli.arguments` | Arguments inserted before the Playwright subcommand | `[]` |
 | `playwrightCodeLensRunner.workingDirectory` | Companion CLI working directory | config directory |
 | `playwrightCodeLensRunner.runOptions` | Extra Inspector and Playwright UI options | `[]` |
 | `playwrightCodeLensRunner.inspector.browser` | Inspector browser/project override | `config` |
+| `playwrightCodeLensRunner.browser` | Default browser for companion modes | `config` |
+| `playwrightCodeLensRunner.companion.browser` | Companion Run browser override; explicit `config` opts out of the default | inherits `browser` |
+| `playwrightCodeLensRunner.flakeLab.browser` | Flake Lab browser override; explicit `config` opts out of the default | inherits `browser` |
 | `playwrightCodeLensRunner.environment` | Environment for discovery and CLI processes | `{}` |
 | `playwrightCodeLensRunner.flakeLab.repeatEach` | Repetitions for companion Flake Lab runs | `10` |
 | `playwrightCodeLensRunner.flakeLab.workers` | Workers for companion Flake Lab runs | `1` |
@@ -234,7 +249,7 @@ npm run vsix
 
 Push a `v`-prefixed tag matching the `package.json` version (for example, `v4.0.0`). The release workflow runs the test suite, builds the VSIX, and attaches it to a GitHub Release with generated release notes.
 
-The core benchmark is separate from unit-test gates. It measures reporter planning, all test-status lookups (including index construction), and final-report reconciliation using three warmup runs and seven measured runs. Compare results on the same machine; real workspace discovery also depends on Playwright and test configuration.
+The core benchmark is separate from unit-test gates. It measures reporter planning, all test-status lookups (including index construction), final-report reconciliation, and generated cases sharing one source declaration using three warmup runs and seven measured runs. Compare results on the same machine; real workspace discovery also depends on Playwright and test configuration.
 
 ### TypeScript 7 and TypeScript 6 side by side
 

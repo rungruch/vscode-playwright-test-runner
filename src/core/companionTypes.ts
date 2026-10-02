@@ -36,6 +36,8 @@ export interface CompanionCliRunRequest {
   startedAt?: number;
   initialTests?: CompanionTestItem[];
   repeatEach?: number;
+  /** Separate argv scopes avoid the cross-product of locations and generated titles. */
+  batches?: Array<{ args: string[]; selection: RunSelection; initialTests: CompanionTestItem[] }>;
 }
 
 type CompanionRunStatus = 'running' | 'passed' | 'failed' | 'cancelled' | 'incomplete';
@@ -90,4 +92,6 @@ export interface ArtifactRecord {
   label: string;
   modifiedAt: number;
   targetId: string;
+  /** Multiple configs can share the same artifact directory. */
+  targetIds?: string[];
 }

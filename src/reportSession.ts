@@ -1,9 +1,8 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { environmentForCli } from './core/cliResolution';
 import { buildShowReportArguments } from './core/reportServer';
 import { SingleActiveSession } from './core/singleActiveSession';
-import { quoteForTerminal } from './core/terminalQuote';
+import { createCliTerminal } from './terminal';
 import { RunTarget } from './runTarget';
 
 export interface ReportSession {
@@ -56,11 +55,7 @@ export class ReportSessionManager implements vscode.Disposable {
     const name = `Playwright Report: ${reportName}`;
 
     this.active.replace(() => {
-      const terminal = vscode.window.createTerminal({
-        name: 'Playwright Report',
-        cwd: target.cwd,
-        env: environmentForCli(target.cli, target.env),
-      });
+      const terminal = createCliTerminal(target, name, buildShowReportArguments(reportPath));
       return {
         handle: terminal,
         value: {
@@ -78,8 +73,6 @@ export class ReportSessionManager implements vscode.Disposable {
     if (!terminal) {
       return;
     }
-    const args = buildShowReportArguments(reportPath);
-    terminal.sendText(quoteForTerminal(target.cli.executable, [...target.cli.argsPrefix, ...args]));
     terminal.show(true);
   }
 

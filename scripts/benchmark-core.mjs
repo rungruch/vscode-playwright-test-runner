@@ -6,6 +6,7 @@ import { performance } from 'node:perf_hooks';
 const require = createRequire(import.meta.url);
 const { CompanionLiveRunTracker } = require('../out/core/companionLive.js');
 const { lookupTestRunStatus, withParsedReport } = require('../out/core/companionReport.js');
+const { editorSelectionsForFile } = require('../out/core/editorSelections.js');
 
 const event = { version: 1, runId: 'benchmark' };
 const summaryFor = total => ({
@@ -38,13 +39,21 @@ for (const count of [250, 1000, 2000]) {
     const mergeStart = performance.now();
     const final = withParsedReport(planned, parsed);
     const mergeMs = performance.now() - mergeStart;
+    const generatedStart = performance.now();
+    const generated = editorSelectionsForFile({ id: 'target', cwd: '/workspace', rootDir: '/workspace',
+      projects: [], errors: [], files: [{ id: 'file', file: tests[0].file, relativeFile: 'example.spec.ts', suites: [],
+        tests: tests.map(test => ({ ...test, fullTitle: test.title, title: test.titlePath[1],
+          location: { file: test.file, line: 1, column: 1 }, projects: [], tags: [], skipped: false })) }] }, tests[0].file, 'file:///workspace/example.spec.ts');
+    const generatedMs = performance.now() - generatedStart;
+    assert.equal(generated.length, 2);
+    assert.equal(generated[1].titlePaths.length, count);
     assert.equal(final.tests.length, count);
     assert.equal(final.passed, count);
-    if (iteration >= 3) samples.push({ planMs, lookupMs, mergeMs });
+    if (iteration >= 3) samples.push({ planMs, lookupMs, mergeMs, generatedMs });
   }
   const median = key => samples.map(sample => sample[key]).sort((a, b) => a - b)[Math.floor(samples.length / 2)];
-  results.push({ tests: count, planMs: median('planMs'), lookupMs: median('lookupMs'), mergeMs: median('mergeMs') });
+  results.push({ tests: count, planMs: median('planMs'), lookupMs: median('lookupMs'), mergeMs: median('mergeMs'), generatedMs: median('generatedMs') });
 }
 console.log('Median milliseconds after 3 warmups and 7 measured runs; lookup includes building the snapshot index.');
 console.table(results.map(row => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, key === 'tests' ? value : +value.toFixed(2)]))));
-console.log('1,000 → 2,000 test growth:', Object.fromEntries(['planMs', 'lookupMs', 'mergeMs'].map(key => [key, +(results[2][key] / results[1][key]).toFixed(2)])));
+console.log('1,000 → 2,000 test growth:', Object.fromEntries(['planMs', 'lookupMs', 'mergeMs', 'generatedMs'].map(key => [key, +(results[2][key] / results[1][key]).toFixed(2)])));

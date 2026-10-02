@@ -6,6 +6,7 @@ src/**
 scripts/**
 fixtures/**
 .gitignore
+.depcheckrc
 .mocharc.json
 .vscode-test.mjs
 esbuild.mjs

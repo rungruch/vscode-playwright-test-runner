@@ -19,7 +19,7 @@ interface CalleeInfo {
 export function parseTestFileAst(
   code: string,
   filePath: string,
-  options?: { targetId?: string; rootDir?: string },
+  options?: { targetId?: string; rootDir?: string; allowUnboundTests?: boolean },
 ): DiscoveredConfig {
   const normalizedFile = path.normalize(filePath);
   const targetId = options?.targetId ?? 'ast';
@@ -56,9 +56,15 @@ export function parseTestFileAst(
     });
   } catch (err) {
     config.errors.push(err instanceof Error ? err.message : String(err));
-    scanFallback(code, fileEntry, targetId, normalizedFile);
+    if (options?.allowUnboundTests !== false) {
+      scanFallback(code, fileEntry, targetId, normalizedFile);
+    } else {
+      config.files = [];
+    }
     return config;
   }
+
+  const bindings = testBindings(ast, options?.allowUnboundTests !== false);
 
   // Active stack of suites: top is currently enclosing suite (null means root)
   const suiteStack: DiscoveredSuite[] = [];
@@ -70,7 +76,7 @@ export function parseTestFileAst(
     }
 
     if (isCallExpression(node)) {
-      const calleeInfo = resolveCallee(node.callee);
+      const calleeInfo = resolveCallee(node.callee, bindings);
       const callback = node.arguments.at(-1) as { type?: string } | undefined;
       if (calleeInfo && node.arguments.length >= 2 && callback
         && ['ArrowFunctionExpression', 'FunctionExpression', 'Identifier'].includes(callback.type ?? '')) {
@@ -147,7 +153,72 @@ export function parseTestFileAst(
   }
 
   walk(ast);
+  if (bindings.size === 0) {
+    config.files = [];
+  }
   return config;
+}
+
+type TestBinding = 'test' | 'describe' | 'namespace';
+
+/** Follow imported Playwright/fixture aliases and locally extended test objects. */
+function testBindings(ast: ReturnType<typeof parse>, allowUnbound: boolean): Map<string, TestBinding> {
+  const bindings = new Map<string, TestBinding>(allowUnbound ? [['test', 'test'], ['it', 'test'], ['describe', 'describe']] : []);
+  const unbound = new Set(bindings.keys());
+  const mergers = new Set<string>();
+  for (const statement of ast.program.body) {
+    if (statement.type !== 'ImportDeclaration') { continue; }
+    const source = statement.source.value;
+    const playwright = source === '@playwright/test' || source.startsWith('@playwright/experimental-ct-');
+    const fixture = source.startsWith('./') || source.startsWith('../');
+    for (const specifier of statement.specifiers) {
+      bindings.delete(specifier.local.name);
+      unbound.delete(specifier.local.name);
+      if (statement.importKind === 'type') { continue; }
+      if (specifier.type === 'ImportNamespaceSpecifier' && (playwright || fixture)) {
+        bindings.set(specifier.local.name, 'namespace');
+      }
+      if (specifier.type !== 'ImportSpecifier' || specifier.importKind === 'type') { continue; }
+      const imported = specifier.imported.type === 'Identifier' ? specifier.imported.name : specifier.imported.value;
+      if (!playwright && !fixture && ['test', 'it', 'describe'].includes(imported)) {
+        for (const name of unbound) { bindings.delete(name); }
+        unbound.clear();
+      }
+      if ((playwright || fixture) && imported === 'test') { bindings.set(specifier.local.name, 'test'); }
+      if (playwright && imported === 'mergeTests') { mergers.add(specifier.local.name); }
+    }
+  }
+  function collect(node: unknown): void {
+    if (!node || typeof node !== 'object') { return; }
+    const n = node as { type?: string; id?: { type?: string; name?: string; properties?: Array<{ key?: { name?: string }; value?: { name?: string } }> }; init?: { type?: string; callee?: unknown; arguments?: Array<{ type?: string; value?: string }> } };
+    if (['ArrowFunctionExpression', 'FunctionExpression', 'FunctionDeclaration', 'ClassDeclaration'].includes(n.type ?? '')) { return; }
+    if (n.type === 'VariableDeclarator' && n.id?.type === 'Identifier' && n.id.name) {
+      const parts = flattenCallee(n.init?.callee);
+      const source = n.init?.arguments?.[0]?.value;
+      const extended = parts.at(-1) === 'extend' && bindings.get(parts[0]) === 'test';
+      const merged = parts.length === 1 && mergers.has(parts[0]);
+      if (extended || merged) { bindings.set(n.id.name, 'test'); }
+      else if (parts[0] === 'require' && source === '@playwright/test') { bindings.set(n.id.name, 'namespace'); }
+      else { bindings.delete(n.id.name); }
+    }
+    if (n.type === 'VariableDeclarator' && n.id?.type === 'ObjectPattern') {
+      const parts = flattenCallee(n.init?.callee);
+      const source = n.init?.arguments?.[0]?.value;
+      for (const property of n.id.properties ?? []) {
+        if (!property.value?.name) { continue; }
+        bindings.delete(property.value.name);
+        if (parts[0] === 'require' && source && (source === '@playwright/test' || source.startsWith('.'))
+          && property.key?.name === 'test') { bindings.set(property.value.name, 'test'); }
+      }
+    }
+    for (const [key, child] of Object.entries(node)) {
+      if (key === 'loc' || key === 'comments' || key === 'tokens') { continue; }
+      if (Array.isArray(child)) { child.forEach(collect); }
+      else if (child && typeof child === 'object') { collect(child); }
+    }
+  }
+  collect(ast);
+  return bindings;
 }
 
 function suiteTitlePath(stack: readonly DiscoveredSuite[]): string[] {
@@ -163,20 +234,27 @@ function isCallExpression(node: unknown): node is {
   return typeof node === 'object' && node !== null && (node as { type?: string }).type === 'CallExpression';
 }
 
-function resolveCallee(callee: unknown): CalleeInfo | undefined {
+function resolveCallee(callee: unknown, bindings: Map<string, TestBinding>): CalleeInfo | undefined {
   if (!callee || typeof callee !== 'object') {
     return undefined;
   }
 
-  const parts = flattenCallee(callee);
+  let parts = flattenCallee(callee);
   if (parts.length === 0) {
     return undefined;
   }
 
-  const root = parts[0];
-  if (root !== 'test' && root !== 'it' && root !== 'describe') {
+  const binding = bindings.get(parts[0]);
+  if (!binding) {
     return undefined;
   }
+  if (binding === 'namespace') {
+    if (parts[1] !== 'test') { return undefined; }
+    parts = ['test', ...parts.slice(2)];
+  } else {
+    parts = [binding, ...parts.slice(1)];
+  }
+  const root = parts[0];
 
   // Exclude non-test Playwright APIs
   const second = parts[1];

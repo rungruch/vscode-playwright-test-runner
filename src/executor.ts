@@ -1,4 +1,5 @@
 import { ChildProcess, spawn } from 'child_process';
+import crossSpawn from 'cross-spawn';
 import { CliCommand, environmentForCli } from './core/cliResolution';
 
 const CLI_PROBE_TIMEOUT_MS = 15_000;
@@ -38,7 +39,7 @@ export interface SpawnOptions {
 export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOptions): RunningCommand {
   const isWindows = process.platform === 'win32';
   const env = environmentForCli(cli, { ...process.env, ...options.env });
-  const child: ChildProcess = spawn(cli.executable, [...cli.argsPrefix, ...args], {
+  const child: ChildProcess = crossSpawn(cli.executable, [...cli.argsPrefix, ...args], {
     cwd: options.cwd,
     env,
     shell: false,
@@ -53,6 +54,7 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
   let escalationTimer: NodeJS.Timeout | undefined;
   let forceTimer: NodeJS.Timeout | undefined;
   let cancelSubscription: { dispose(): void } | undefined;
+  let shutdown: Promise<void> = Promise.resolve();
 
   const clearTimer = (timer: NodeJS.Timeout | undefined) => {
     if (timer) {
@@ -71,21 +73,20 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
     cancelSubscription = undefined;
   };
 
-  const killTree = (force: boolean) => {
+  const killTree = (force: boolean): Promise<void> => {
     if (child.pid === undefined) {
-      return;
+      return Promise.resolve();
     }
     if (isWindows) {
       const args = ['/pid', String(child.pid), '/T'];
       if (force) {
         args.push('/F');
       }
-      try {
-        spawn('taskkill', args, { shell: false, windowsHide: true });
-      } catch {
-        /* best effort */
-      }
-      return;
+      return new Promise<void>((resolve) => {
+        const killer = spawn('taskkill', args, { shell: false, windowsHide: true });
+        killer.on('error', () => { child.kill(); resolve(); });
+        killer.on('close', () => resolve());
+      });
     }
     const signal = force ? 'SIGKILL' : 'SIGTERM';
     try {
@@ -97,16 +98,16 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
         /* already gone */
       }
     }
+    return Promise.resolve();
   };
 
-  const interrupt = () => {
+  const interrupt = (): Promise<void> => {
     if (child.pid === undefined) {
-      return;
+      return Promise.resolve();
     }
     if (isWindows) {
-      killTree(false);
-      forceTimer = setTimeout(() => killTree(true), 2000);
-      return;
+      // taskkill must capture descendants while their parent still exists.
+      return killTree(true);
     }
     try {
       // Graceful interrupt first so Playwright can flush reporters.
@@ -118,10 +119,27 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
         /* already gone */
       }
     }
-    escalationTimer = setTimeout(() => {
-      killTree(false);
-      forceTimer = setTimeout(() => killTree(true), 2000);
-    }, 2000);
+    return new Promise((resolve) => {
+      const groupAlive = () => {
+        try { process.kill(-child.pid!, 0); return true; } catch { return false; }
+      };
+      const poll = setInterval(() => {
+        if (!groupAlive()) {
+          clearInterval(poll);
+          clearTimer(escalationTimer);
+          clearTimer(forceTimer);
+          resolve();
+        }
+      }, 100);
+      escalationTimer = setTimeout(() => {
+        killTree(false);
+        forceTimer = setTimeout(() => {
+          killTree(true);
+          clearInterval(poll);
+          resolve();
+        }, 2000);
+      }, 2000);
+    });
   };
 
   const outcome = new Promise<SpawnOutcome>((resolve) => {
@@ -130,12 +148,11 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
         return;
       }
       settled = true;
-      cleanup();
-      resolve({
-        exitCode,
-        signal,
-        cancelled: stopReason === 'cancelled',
-        timedOut: stopReason === 'timeout',
+      // Parent exit does not imply process-group exit. Keep escalation alive
+      // until descendants have been terminated, even if stdio is already closed.
+      void shutdown.then(() => {
+        cleanup();
+        resolve({ exitCode, signal, cancelled: stopReason === 'cancelled', timedOut: stopReason === 'timeout' });
       });
     };
     child.stdout?.setEncoding('utf8');
@@ -160,7 +177,7 @@ export function spawnCommand(cli: CliCommand, args: string[], options: SpawnOpti
       return;
     }
     stopReason = reason;
-    interrupt();
+    shutdown = interrupt();
   };
 
   cancelSubscription = options.cancellation?.onCancellationRequested(() => requestStop('cancelled'));

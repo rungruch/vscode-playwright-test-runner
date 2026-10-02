@@ -14,6 +14,7 @@ import {
   COMPANION_REPORTER_RUN_ID_ENV,
 } from './core/companionLive';
 import { CompanionCliRunRequest, CompanionRunSummary } from './core/companionTypes';
+import { combineRunBatches } from './core/companionBatches';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 import { Settings } from './settings';
@@ -46,6 +47,9 @@ export class CompanionCliRunner implements vscode.Disposable {
   private readonly reporterPath: string;
   private latest: CompanionRunSummary | undefined;
   private history: CompanionRunSummary[] = [];
+  private readonly outputDocuments: vscode.Disposable;
+  private readonly outputScheme = `playwright-run-output-${Math.random().toString(36).slice(2)}`;
+  private readonly outputChanged = new vscode.EventEmitter<vscode.Uri>();
 
   readonly onDidChange = this.emitter.event;
   readonly onDidChangeTests = this.testsEmitter.event;
@@ -60,6 +64,14 @@ export class CompanionCliRunner implements vscode.Disposable {
         tests: run.tests?.map((test) => test.status === 'running' ? { ...test, status: 'pending', activeRuns: 0 } : test),
       } : run);
     this.latest = this.history[0];
+    this.outputDocuments = vscode.workspace.registerTextDocumentContentProvider(this.outputScheme, {
+      onDidChange: this.outputChanged.event,
+      provideTextDocumentContent: (uri) => {
+        const run = this.history.find((candidate) => candidate.id === uri.query);
+        return run ? `Playwright ${run.kind} — ${run.status}\nConfig: ${run.configFile ?? run.cwd}\nStarted: ${new Date(run.startedAt).toISOString()}\nRetained output tail (up to ${OUTPUT_TAIL_LIMIT.toLocaleString('en-US')} characters):\n\n${run.output ?? '(No output captured.)'}`
+          : 'This run is no longer retained in history.';
+      },
+    });
   }
 
   get latestRun(): CompanionRunSummary | undefined {
@@ -152,22 +164,29 @@ export class CompanionCliRunner implements vscode.Disposable {
     this.output.appendLine(`\n[${new Date(startedAt).toLocaleTimeString()}] ${request.kind} — ${target.configFile ?? target.cwd}`);
     this.output.appendLine(this.commandPreview(target, request.args));
 
+    const baseSummary = summary;
+    let currentBatch = summary;
+    const completedBatches: CompanionRunSummary[] = [];
+    let queuedTests: NonNullable<CompanionRunSummary['tests']> = [];
     let tempDirectory: string | undefined;
     let collectedOutput = '';
+    let batchOutput = '';
     const decoder = new CompanionReporterEventDecoder(id);
-    const liveTracker = new CompanionLiveRunTracker(target.cwd, summary.tests);
+    let liveTracker = new CompanionLiveRunTracker(target.cwd, summary.tests);
     const appendVisible = (text: string) => {
       if (!text || this.disposed) {
         return;
       }
       collectedOutput = trimOutput(`${collectedOutput}${text}`);
+      batchOutput = trimOutput(`${batchOutput}${text}`);
       this.output.append(text);
     };
     const publishLive = (next: CompanionRunSummary) => {
-      if (next === summary) {
+      if (next === currentBatch) {
         return;
       }
-      summary = next;
+      currentBatch = next;
+      summary = { ...combineRunBatches(baseSummary, completedBatches, next, queuedTests), output: collectedOutput };
       this.updateSummary(summary, settings.sidebarHistorySize);
       this.publish(summary);
     };
@@ -185,7 +204,7 @@ export class CompanionCliRunner implements vscode.Disposable {
       }
       liveTimer = setTimeout(() => {
         clearLiveTimer();
-        publishLive(liveTracker.snapshot(summary, Date.now() - startedAt));
+        publishLive(liveTracker.snapshot(currentBatch, Date.now() - startedAt));
       }, LIVE_UPDATE_INTERVAL_MS);
       this.liveTimers.add(liveTimer);
     };
@@ -212,34 +231,54 @@ export class CompanionCliRunner implements vscode.Disposable {
         await this.persist(summary, settings.sidebarHistorySize);
         return summary;
       }
-      const resultFile = path.join(tempDirectory, 'result.json');
-      const running = spawnCommand(target.cli, [...request.args, `--reporter=line,json,${this.reporterPath}`], {
-        cwd: target.cwd,
-        env: {
-          ...request.env,
-          // Playwright's JSON reporter honours this path while stdout remains
-          // a compatible fallback for older supported releases.
-          PLAYWRIGHT_JSON_OUTPUT_NAME: resultFile,
-          [COMPANION_REPORTER_RUN_ID_ENV]: id,
-        },
-        cancellation: source.token,
-        onStdout: appendStdout,
-        onStderr: appendVisible,
-      });
-      const outcome = await running.outcome;
-      clearLiveTimer();
-      appendVisible(decoder.flush());
-      summary = liveTracker.finish(summary, outcome.cancelled, Date.now() - startedAt);
-      const report = await readResult(resultFile) ?? collectedOutput;
-      if (!outcome.cancelled) {
-        summary = withParsedReport(summary, parseCompanionJsonReport(report));
+      const batches = request.batches?.length ? request.batches : [{ args: request.args, selection: request.selection, initialTests }];
+      let cancelled = false;
+      let failedProcess = false;
+      for (const [index, batch] of batches.entries()) {
+        batchOutput = '';
+        queuedTests = batches.slice(index + 1).flatMap((batch) => batch.initialTests);
+        if (request.batches?.length) {
+          currentBatch = { ...baseSummary, total: batch.initialTests.length, tests: batch.initialTests,
+            completedTests: 0, activeTests: 0, failures: [], passed: 0, failed: 0, skipped: 0, flaky: 0 };
+          liveTracker = new CompanionLiveRunTracker(target.cwd, batch.initialTests);
+          if (batches.length > 1) {
+            appendVisible(`\nScope ${index + 1}/${batches.length}: ${this.commandPreview(target, batch.args)}\n`);
+          }
+        }
+        const resultFile = path.join(tempDirectory, `result-${index}.json`);
+        const running = spawnCommand(target.cli, [...batch.args, `--reporter=line,json,${this.reporterPath}`], {
+          cwd: target.cwd,
+          env: {
+            ...request.env,
+            // Playwright's JSON reporter honours this path while stdout remains
+            // a compatible fallback for older supported releases.
+            PLAYWRIGHT_JSON_OUTPUT_NAME: resultFile,
+            [COMPANION_REPORTER_RUN_ID_ENV]: id,
+          },
+          cancellation: source.token,
+          onStdout: appendStdout,
+          onStderr: appendVisible,
+        });
+        const outcome = await running.outcome;
+        clearLiveTimer();
+        appendVisible(decoder.flush());
+        currentBatch = liveTracker.finish(currentBatch, outcome.cancelled, Date.now() - startedAt);
+        const report = await readResult(resultFile) ?? batchOutput;
+        if (!outcome.cancelled) {
+          currentBatch = withParsedReport(currentBatch, parseCompanionJsonReport(report));
+        }
+        summary = combineRunBatches(baseSummary, completedBatches, currentBatch, queuedTests);
+        cancelled = outcome.cancelled;
+        failedProcess ||= outcome.exitCode !== 0;
+        if (cancelled) { break; }
+        completedBatches.push(currentBatch);
       }
       summary = {
         ...summary,
         durationMs: Math.max(summary.durationMs, Date.now() - startedAt),
-        status: outcome.cancelled
+        status: cancelled
           ? 'cancelled'
-          : outcome.exitCode === 0
+          : !failedProcess
             ? 'passed'
             : summary.total > 0
               ? 'failed'
@@ -257,7 +296,8 @@ export class CompanionCliRunner implements vscode.Disposable {
       return summary;
     } catch (error) {
       clearLiveTimer();
-      summary = liveTracker.finish(summary, source.token.isCancellationRequested, Date.now() - startedAt);
+      currentBatch = liveTracker.finish(currentBatch, source.token.isCancellationRequested, Date.now() - startedAt);
+      summary = combineRunBatches(baseSummary, completedBatches, currentBatch, queuedTests);
       summary = {
         ...summary,
         durationMs: Date.now() - startedAt,
@@ -294,8 +334,22 @@ export class CompanionCliRunner implements vscode.Disposable {
     }
   }
 
-  showOutput(): void {
-    this.output.show(true);
+  async showOutput(runId?: string): Promise<void> {
+    if (!runId) {
+      this.output.show(true);
+      return;
+    }
+    const run = this.history.find((candidate) => candidate.id === runId);
+    if (!run) {
+      void vscode.window.showInformationMessage('This run is no longer retained in history.');
+      return;
+    }
+    const uri = this.outputUri(run);
+    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
+  }
+
+  private outputUri(run: CompanionRunSummary): vscode.Uri {
+    return vscode.Uri.from({ scheme: this.outputScheme, path: `/Playwright ${run.kind} ${run.id}.log`, query: run.id });
   }
 
   dispose(): void {
@@ -305,6 +359,8 @@ export class CompanionCliRunner implements vscode.Disposable {
       clearTimeout(timer);
     }
     this.liveTimers.clear();
+    this.outputDocuments.dispose();
+    this.outputChanged.dispose();
     this.testsEmitter.dispose();
     this.output.dispose();
     this.emitter.dispose();
@@ -324,6 +380,7 @@ export class CompanionCliRunner implements vscode.Disposable {
     if (this.disposed) {
       return;
     }
+    this.outputChanged.fire(this.outputUri(summary));
     this.emitter.fire(summary);
     this.testsEmitter.fire({
       runId: summary.id,

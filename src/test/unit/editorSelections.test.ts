@@ -57,6 +57,14 @@ const MODEL: DiscoveredConfig = {
 };
 
 suite('editorSelections', () => {
+  test('collapses thousands of generated cases once, preserving order and project deduplication', () => {
+    const tests = Array.from({ length: 2000 }, (_, index) => ({ ...MODEL.files[0].tests[0],
+      id: String(index), title: `case ${index}`, fullTitle: `case ${index}` }));
+    const model = { ...MODEL, files: [{ ...MODEL.files[0], suites: [], tests: [...tests, ...tests] }] };
+    const selections = editorSelectionsForFile(model, FILE, 'file:///workspace/tests/example.spec.ts');
+    assert.strictEqual(selections.length, 2);
+    assert.deepStrictEqual(selections[1].titlePaths, tests.map((test) => [test.title]));
+  });
   test('flattens file, nested suites, top-level tests, and duplicate titles', () => {
     const selections = editorSelectionsForFile(MODEL, FILE, 'file:///workspace/tests/example.spec.ts');
     assert.deepStrictEqual(

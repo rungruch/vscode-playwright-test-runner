@@ -20,10 +20,12 @@ suite('terminalQuote', () => {
     );
   });
 
-  test('double-quotes on windows', () => {
+  test('uses the PowerShell call operator and literal quoting on Windows', () => {
     assert.strictEqual(
       quoteForTerminal('npx.cmd', ['playwright', 'C:\\my dir\\trace.zip'], 'win32'),
-      'npx.cmd playwright "C:\\my dir\\trace.zip"',
+      "& 'npx.cmd' 'playwright' 'C:\\my dir\\trace.zip'",
     );
+    assert.strictEqual(quoteForTerminal('C:\\Program Files\\node.exe', ["it's", '$x;&'], 'win32', 'pwsh.exe'),
+      "& 'C:\\Program Files\\node.exe' 'it''s' '$x;&'");
   });
 });

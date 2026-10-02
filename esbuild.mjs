@@ -36,6 +36,10 @@ const builds = [{
   ...shared,
   entryPoints: ['src/companionReporter.ts'],
   outfile: 'dist/companionReporter.cjs',
+}, {
+  ...shared,
+  entryPoints: ['src/terminalLauncher.ts'],
+  outfile: 'dist/terminalLauncher.cjs',
 }];
 
 async function main() {

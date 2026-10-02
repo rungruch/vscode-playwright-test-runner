@@ -149,6 +149,7 @@ suite('Playwright CodeLens Runner extension', () => {
       assert.deepStrictEqual(captured[0].initialTests?.map((test) => test.titlePath), [['survivor']]);
       assert.deepStrictEqual(captured[0].selection.files, [uri.fsPath]);
       assert.strictEqual(captured[0].selection.titleFilters.length, 1);
+      assert.deepStrictEqual(captured[0].selection.locations, [{ file: uri.fsPath, line: 2, column: 5 }]);
       history.history = [{ ...summary, failures: failures.slice(0, 3) }];
       await vscode.commands.executeCommand('playwrightCodeLensRunner.rerunFailedCli', summary.id);
       assert.strictEqual(captured.length, 1, 'an empty batch must not launch the original file scope');
@@ -158,6 +159,81 @@ suite('Playwright CodeLens Runner extension', () => {
       await configuration.update('sidebar.autoFocus', previousFocus, vscode.ConfigurationTarget.Global);
       await vscode.workspace.fs.delete(uri).then(undefined, () => undefined);
       await vscode.workspace.fs.delete(config).then(undefined, () => undefined);
+      await api.discovery.refreshAll();
+    }
+  });
+
+  test('reruns only the failed declaration when flattened titles collide', async () => {
+    const uri = vscode.Uri.joinPath(fixture.uri, 'tests', 'title-collisions.spec.ts');
+    await api.discovery.refreshAll();
+    const target = api.discovery.currentTargets.find(target => target.configFile === vscode.Uri.joinPath(fixture.uri, 'playwright.config.ts').fsPath);
+    assert.ok(target);
+    const internals = api.runner as unknown as { history: CompanionRunSummary[] };
+    const savedHistory = internals.history;
+    const originalRun = api.runner.run;
+    const batchCounts: number[] = [];
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner');
+    const focus = configuration.inspect<boolean>('sidebar.autoFocus')?.globalValue;
+    const output = configuration.inspect<string>('companion.showCliOutput')?.globalValue;
+    const summary: CompanionRunSummary = { id: 'title-collision-rerun', kind: 'companion-run', targetId: target.id,
+      cwd: target.cwd, configFile: target.configFile, startedAt: 1, status: 'failed', durationMs: 1,
+      total: 1, passed: 0, failed: 1, skipped: 0, flaky: 0, args: [], projects: ['browserless'],
+      selection: { files: [uri.fsPath], titleFilters: [] },
+      failures: [{ title: 'foo bar', titlePath: ['foo', 'bar'], file: uri.fsPath, line: 4, column: 3 }] };
+    try {
+      await configuration.update('sidebar.autoFocus', false, vscode.ConfigurationTarget.Global);
+      await configuration.update('companion.showCliOutput', 'never', vscode.ConfigurationTarget.Global);
+      api.runner.run = (target, request, token) => {
+        batchCounts.push(request.batches?.length ?? 0);
+        return originalRun.call(api.runner, target, request, token);
+      };
+      internals.history = [summary];
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.rerunFailedCli', summary.id);
+      const result = api.runner.runs[0];
+      assert.strictEqual(result.kind, 'rerun-failed');
+      assert.strictEqual(result.status, 'passed');
+      assert.strictEqual(result.total, 1);
+      assert.deepStrictEqual(result.tests?.map(test => test.titlePath), [['foo', 'bar']]);
+      assert.strictEqual(result.tests?.[0].line, 4);
+      internals.history = [{ ...summary, total: 2, failed: 2, failures: [...summary.failures,
+        { title: 'foo bar', titlePath: ['foo bar'], file: uri.fsPath, line: 9, column: 1 }] }];
+      await vscode.commands.executeCommand('playwrightCodeLensRunner.rerunFailedCli', summary.id);
+      assert.strictEqual(api.runner.runs[0].total, 2);
+      assert.strictEqual(api.runner.runs[0].passed, 2);
+      assert.deepStrictEqual(batchCounts, [1, 1], 'ordinary declarations share one CLI process');
+    } finally {
+      api.runner.run = originalRun;
+      internals.history = savedHistory;
+      await configuration.update('sidebar.autoFocus', focus, vscode.ConfigurationTarget.Global);
+      await configuration.update('companion.showCliOutput', output, vscode.ConfigurationTarget.Global);
+    }
+  });
+
+  test('refreshes generated cases when an opted-in imported data file changes or disappears', async () => {
+    const data = vscode.Uri.joinPath(fixture.uri, 'watched-cases.json');
+    const file = vscode.Uri.joinPath(fixture.uri, 'tests', 'watched-cases.spec.ts');
+    const config = vscode.Uri.joinPath(fixture.uri, 'playwright.watched-cases.config.ts');
+    const configuration = vscode.workspace.getConfiguration('playwrightCodeLensRunner');
+    const saved = configuration.inspect<string[]>('discovery.watchPatterns')?.globalValue;
+    try {
+      await vscode.workspace.fs.writeFile(data, Buffer.from('["first", "second"]'));
+      await vscode.workspace.fs.writeFile(file, Buffer.from("import { test } from '@playwright/test';\nimport cases from '../watched-cases.json';\nfor (const name of cases) { test(name, async () => {}); }\n"));
+      await vscode.workspace.fs.writeFile(config, Buffer.from("export default { testDir: './tests', testMatch: 'watched-cases.spec.ts' };\n"));
+      await configuration.update('discovery.watchPatterns', ['watched-cases.json'], vscode.ConfigurationTarget.Global);
+      await api.discovery.refreshAll();
+      const target = api.discovery.currentTargets.find(target => target.configFile === config.fsPath);
+      assert.ok(target);
+      const titles = () => api.discovery.cachedModel(target.id)?.files.find(candidate => candidate.file === file.fsPath)?.tests.map(test => test.title);
+      await waitUntil('initial generated cases settle after watcher registration', () => titles()?.join() === 'first,second');
+      await vscode.workspace.fs.writeFile(data, Buffer.from('["third"]'));
+      await waitUntil('imported data refreshes generated cases', () => titles()?.join() === 'third');
+      await vscode.workspace.fs.delete(data);
+      await waitUntil('deleted data invalidates discovery', () => Boolean(api.discovery.errorFor(target.id)));
+      await vscode.workspace.fs.writeFile(data, Buffer.from('["recreated"]'));
+      await waitUntil('recreated data restores discovery', () => titles()?.join() === 'recreated');
+    } finally {
+      await configuration.update('discovery.watchPatterns', saved, vscode.ConfigurationTarget.Global);
+      for (const uri of [file, data, config]) { await vscode.workspace.fs.delete(uri).then(undefined, () => undefined); }
       await api.discovery.refreshAll();
     }
   });
