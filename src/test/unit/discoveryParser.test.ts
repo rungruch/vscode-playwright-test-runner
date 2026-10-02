@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as path from 'path';
 import { extractJson, parseDiscoveryOutput } from '../../core/discoveryParser';
 
 const BASE = { id: '/ws/playwright.config.ts', cwd: '/ws', configFile: '/ws/playwright.config.ts' };
@@ -16,7 +17,7 @@ suite('discoveryParser', () => {
   test('parses a minimal empty report', () => {
     const model = parseDiscoveryOutput(report(), BASE);
     assert.strictEqual(model.id, BASE.id);
-    assert.strictEqual(model.rootDir, '/ws');
+    assert.strictEqual(model.rootDir, path.normalize('/ws'));
     assert.deepStrictEqual(model.projects, ['chromium', 'firefox']);
     assert.deepStrictEqual(model.files, []);
     assert.deepStrictEqual(model.errors, []);
@@ -66,7 +67,7 @@ suite('discoveryParser', () => {
 
     assert.strictEqual(model.files.length, 1);
     const file = model.files[0];
-    assert.strictEqual(file.relativeFile, 'tests/login.spec.ts');
+    assert.strictEqual(file.relativeFile, path.join('tests', 'login.spec.ts'));
     assert.strictEqual(file.suites.length, 1);
     const suite = file.suites[0];
     assert.strictEqual(suite.title, 'Login');
@@ -145,7 +146,7 @@ suite('discoveryParser', () => {
 
     assert.strictEqual(model.files.length, 1);
     const file = model.files[0];
-    assert.strictEqual(file.relativeFile, 'tests/nested/scoped.spec.ts');
+    assert.strictEqual(file.relativeFile, path.join('tests', 'nested', 'scoped.spec.ts'));
     assert.deepStrictEqual(file.tests.map((test) => test.fullTitle), ['top-level nested test']);
     assert.deepStrictEqual(file.suites.map((suite) => suite.title), ['nested suite']);
     assert.deepStrictEqual(file.suites[0].tests.map((test) => test.fullTitle), ['nested suite nested test']);

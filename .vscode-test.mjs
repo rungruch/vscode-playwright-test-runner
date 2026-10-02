@@ -1,11 +1,18 @@
 // @ts-check
+import { mkdtempSync, rmSync } from 'node:fs';
 import { defineConfig } from '@vscode/test-cli';
 
 const officialExtension = 'ms-playwright.playwright@1.1.19';
+// macOS IPC sockets cannot fit under a deeply nested CI checkout.
+const userDataDir = process.platform === 'darwin' ? mkdtempSync('/tmp/pw-vscode-') : undefined;
+if (userDataDir) {
+  process.once('exit', () => rmSync(userDataDir, { recursive: true, force: true }));
+}
 
 const common = {
   installExtensions: [officialExtension],
   skipExtensionDependencies: true,
+  launchArgs: userDataDir ? [`--user-data-dir=${userDataDir}`] : [],
   mocha: {
     ui: 'tdd',
     timeout: 60000,
