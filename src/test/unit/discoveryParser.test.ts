@@ -27,7 +27,10 @@ suite('discoveryParser', () => {
     const model = parseDiscoveryOutput(report({ config: { rootDir: '/ws/tests', projects: [
       { name: 'first', testDir: '/ws/tests' }, { name: 'second', testDir: '/sibling/custom-tests' },
     ] } }), BASE);
-    assert.deepStrictEqual(model.testDirs, [path.normalize('/sibling/custom-tests'), path.normalize('/ws/tests')]);
+    assert.deepStrictEqual(model.testDirs, [
+      path.resolve(BASE.cwd, '/sibling/custom-tests'),
+      path.resolve(BASE.cwd, '/ws/tests'),
+    ].sort());
   });
 
   test('parses nested suites with tests and project metadata', () => {

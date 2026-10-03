@@ -79,7 +79,7 @@ suite('explorer tree', () => {
     assert.deepStrictEqual(roots.map((node) => [node.kind, node.label]), [['file', 'root.spec.ts'], ['folder', 'tests']]);
     const tests = roots[1];
     assert.ok(tests.kind === 'folder');
-    assert.strictEqual(tests.directory, path.join(base.cwd, 'tests'));
+    assert.strictEqual(tests.directory, path.resolve(base.cwd, 'tests'));
     assert.deepStrictEqual(tests.children.map((node) => node.label), ['a.spec.ts', 'nested', 'z.spec.ts']);
     assert.deepStrictEqual(tests.children[1].children.map((node) => node.label), ['a.spec.ts', 'b.spec.ts']);
     assert.strictEqual(flatten(roots).filter((node) => node.kind === 'test').length, files.length);
@@ -111,7 +111,7 @@ suite('explorer tree', () => {
     assert.deepStrictEqual(flatten(roots).map((node) => node.label), ['..', 'shared', 'tests', 'example.spec.ts', 'external test']);
     const file = flatten(roots).find((node) => node.kind === 'file')!;
     assert.ok(file.kind === 'file');
-    assert.strictEqual(file.selection?.file, '/shared/tests/example.spec.ts');
+    assert.strictEqual(file.selection?.file, path.resolve(base.cwd, '../shared/tests/example.spec.ts'));
     assert.deepStrictEqual(explorerTree({ ...external, files: [] }, 1, uri), []);
   });
 });
