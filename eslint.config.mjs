@@ -10,6 +10,7 @@ export default tseslint.config(
       'node_modules/**',
       '.vscode-test/**',
       'fixtures/**',
+      'benchmarks/baselines/**',
       '*.vsix',
     ],
   },

@@ -23,6 +23,13 @@ suite('discoveryParser', () => {
     assert.deepStrictEqual(model.errors, []);
   });
 
+  test('retains project test directories outside the reported root', () => {
+    const model = parseDiscoveryOutput(report({ config: { rootDir: '/ws/tests', projects: [
+      { name: 'first', testDir: '/ws/tests' }, { name: 'second', testDir: '/sibling/custom-tests' },
+    ] } }), BASE);
+    assert.deepStrictEqual(model.testDirs, [path.normalize('/sibling/custom-tests'), path.normalize('/ws/tests')]);
+  });
+
   test('parses nested suites with tests and project metadata', () => {
     const model = parseDiscoveryOutput(report({
       suites: [

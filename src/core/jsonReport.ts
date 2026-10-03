@@ -17,6 +17,7 @@ interface JsonConfig {
 
 interface JsonProject {
   name?: string;
+  testDir?: string;
 }
 
 interface JsonReportError {

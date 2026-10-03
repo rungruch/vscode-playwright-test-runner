@@ -31,9 +31,33 @@ const fixtures = [
 
 for (const fixture of fixtures) {
   await verifyFixture(fixture);
+  await verifyFailureColors(fixture);
 }
 
 console.log('Companion reporter compatibility checks passed.');
+
+async function verifyFailureColors(fixture) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'playwright-colored-failure-'));
+  try {
+    const config = path.join(directory, 'playwright.config.cjs');
+    await fs.writeFile(config, `module.exports = { testDir: ${JSON.stringify(directory)}, outputDir: ${JSON.stringify(path.join(directory, 'results'))} };`);
+    await fs.writeFile(path.join(directory, 'color.spec.js'),
+      `const { test, expect } = require(${JSON.stringify(path.join(fixture.directory, 'node_modules', '@playwright', 'test'))});\n`
+      + `test('colored assertion failure', () => { expect('actual').toBe('expected'); });\n`);
+    const result = await run(process.execPath, [path.join(fixture.directory, 'node_modules', 'playwright', 'cli.js'),
+      'test', '--config', config, '--reporter=list'], {
+      cwd: fixture.directory,
+      env: { ...process.env, FORCE_COLOR: '1', NO_COLOR: undefined, DEBUG_COLORS: undefined, PLAYWRIGHT_FORCE_TTY: '0' },
+    });
+    assert.equal(result.code, 1, `${fixture.name} intentional assertion failure`);
+    assert.ok(result.stdout.includes('Expected:') && result.stdout.includes('Received:'), `${fixture.name} assertion diff`);
+    assert.ok(result.stdout.includes('toBe') && result.stdout.includes('color.spec.js'), `${fixture.name} source code frame`);
+    assert.ok(result.stdout.includes('\x1b[31m'), `${fixture.name} red failure output`);
+    assert.ok(result.stdout.includes('\x1b[32m'), `${fixture.name} green expected value`);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+}
 
 async function verifyFixture(fixture) {
   const temporaryDirectory = await fs.mkdtemp(path.join(os.tmpdir(), 'playwright-codelens-reporter-test-'));
@@ -44,17 +68,23 @@ async function verifyFixture(fixture) {
     const result = await run(process.execPath, [
       cliPath,
       ...fixture.args,
-      `--reporter=line,json,${reporterPath}`,
+      `--reporter=list,json,${reporterPath}`,
     ], {
       cwd: fixture.directory,
       env: {
         ...process.env,
         PLAYWRIGHT_CODELENS_RUN_ID: runId,
+        FORCE_COLOR: '1',
+        NO_COLOR: undefined,
+        DEBUG_COLORS: undefined,
+        PLAYWRIGHT_FORCE_TTY: '0',
         PLAYWRIGHT_JSON_OUTPUT_NAME: resultFile,
       },
     });
 
     assert.equal(result.code, 0, `${fixture.name} run failed:\n${result.stderr}\n${result.stdout}`);
+    assert.ok(result.stdout.includes('\x1b['), `${fixture.name} preserves reporter colors`);
+    assert.ok(!new RegExp(`${String.fromCharCode(27)}\\[\\d*[AFGK]`).test(result.stdout), `${fixture.name} does not rewrite completed lines`);
     const events = reporterEvents(result.stdout, runId);
     const plan = events.filter((event) => event.type === 'plan');
     const begins = events.filter((event) => event.type === 'testBegin');

@@ -5,6 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { PlaywrightCodeLensProvider } from '../../codeLens';
 import { CompanionCliRunner } from '../../companionRunner';
+import { CompanionOutput } from '../../companionOutput';
 import { CompanionCliRunRequest, CompanionRunSummary } from '../../core/companionTypes';
 import { DiscoveryService } from '../../discoveryService';
 import { RunTarget } from '../../runTarget';
@@ -107,14 +108,54 @@ suite('responsive editor and concurrent companion runs', () => {
     runner.dispose();
     const restored = new CompanionCliRunner(context);
     try {
+      let shown: CompanionRunSummary | undefined;
+      const output = (restored as unknown as { output: CompanionOutput }).output;
+      output.show = (run) => { shown = run; };
       await restored.showOutput(first.id);
-      const document = vscode.window.activeTextEditor?.document;
-      assert.ok(document);
-      assert.ok(document.uri.scheme.startsWith('playwright-run-output-'));
-      assert.ok(document.getText().includes('output-old'));
-      assert.ok(!document.getText().includes('output-new'));
-      assert.ok(document.getText().includes('Retained output tail'));
+      assert.strictEqual(shown?.id, first.id);
+      assert.ok(shown?.output?.includes('output-old'));
+      assert.ok(!shown?.output?.includes('output-new'));
+      assert.ok(shown?.output?.includes('\x1b[1;32mCompanion run passed'));
     } finally { restored.dispose(); }
+  });
+
+  test('renders colored output, buffers until the terminal opens, and isolates concurrent runs', () => {
+    const terminals: Array<{ pty: vscode.Pseudoterminal; shown: number; disposed: boolean }> = [];
+    const output = new CompanionOutput((options) => {
+      const state = { pty: options.pty, shown: 0, disposed: false };
+      terminals.push(state);
+      return { show: () => state.shown++, dispose: () => { state.disposed = true; state.pty.close(); } } as unknown as vscode.Terminal;
+    });
+    const summary = (id: string): CompanionRunSummary => ({
+      ...syntheticRequest(fakeTarget(os.tmpdir()), 0, 1), id, startedAt: 1, status: 'running', durationMs: 0,
+      total: 1, passed: 0, failed: 0, skipped: 0, flaky: 0, failures: [], output: `\x1b[32m${id}\x1b[0m\n`,
+    });
+    try {
+      output.show(summary('one'));
+      output.append('one', 'before open\n');
+      let one = '';
+      terminals[0].pty.onDidWrite((text) => { one += text; });
+      terminals[0].pty.open(undefined);
+      assert.ok(one.includes('\x1b[32mone\x1b[0m\r\n'));
+      assert.ok(one.includes('before open\r\n'));
+      output.show(summary('one'));
+      assert.strictEqual(terminals.length, 1, 'reopening output reuses the terminal');
+      assert.strictEqual(terminals[0].shown, 2);
+      output.show(summary('two'));
+      let two = '';
+      terminals[1].pty.onDidWrite((text) => { two += text; });
+      terminals[1].pty.open(undefined);
+      output.append('two', 'second run\n');
+      output.append('one', 'first run\n');
+      assert.ok(one.endsWith('first run\r\n'));
+      assert.ok(!one.includes('second run'));
+      assert.ok(two.endsWith('second run\r\n'));
+      assert.ok(!two.includes('first run'));
+      terminals[0].pty.close();
+      output.show({ ...summary('one'), output: 'reopened snapshot\n' });
+      assert.strictEqual(terminals.length, 3);
+    } finally { output.dispose(); }
+    assert.ok(terminals[1].disposed && terminals[2].disposed);
   });
 
   test('executes exact scopes as one managed run without losing earlier batch results', async () => {
@@ -236,6 +277,65 @@ suite('responsive editor and concurrent companion runs', () => {
       event.dispose();
       cancellation.dispose();
       await configuration.update('codeLens.fastStaticDiscovery', previousStatic, vscode.ConfigurationTarget.Global);
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('coalesces complete inventory refreshes and preserves the cached CLI version', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'explorer-inventory-'));
+    const file = path.join(directory, 'one.spec.ts');
+    const log = path.join(directory, 'calls.log');
+    const report = { config: { rootDir: directory }, suites: ['one', 'two'].map((title) => ({
+      title: `${title}.spec.ts`, file: path.join(directory, `${title}.spec.ts`),
+      specs: [{ id: title, title, file: path.join(directory, `${title}.spec.ts`), line: 1, column: 1 }],
+    })) };
+    const target = fakeTarget(directory);
+    target.cli.argsPrefix = ['-e', `
+      const version = process.argv.includes('--version');
+      require('fs').appendFileSync(${JSON.stringify(log)}, version ? 'version\\n' : process.argv.length > 4 ? 'file\\n' : 'full\\n');
+      setTimeout(() => process.stdout.write(version ? 'Version 1.62.1' : ${JSON.stringify(JSON.stringify(report))}), 30);
+    `, '--'];
+    const discovery = new DiscoveryService({ workspaceState: { get: () => undefined, update: async () => undefined } } as unknown as vscode.ExtensionContext);
+    const internals = discovery as unknown as { targets: RunTarget[] };
+    internals.targets = [target];
+    const subscription = discovery.subscribeInventory();
+    try {
+      await Promise.all([discovery.discover(target), discovery.discover(target)]);
+      await discovery.refreshSavedFiles([file, file]);
+      const deadline = Date.now() + 5000;
+      while (!discovery.cachedModel(target.id) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.strictEqual(discovery.cachedModel(target.id)?.files.length, 2);
+      await new Promise((resolve) => setTimeout(resolve, 650));
+      const calls = (await fs.readFile(log, 'utf8')).trim().split('\n');
+      assert.strictEqual(calls.filter((call) => call === 'version').length, 1);
+      assert.strictEqual(calls.filter((call) => call === 'full').length, 2);
+      assert.strictEqual(calls.filter((call) => call === 'file').length, 1);
+    } finally {
+      subscription.dispose();
+      discovery.dispose();
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('does not invoke the CLI for unrelated configless inventory targets', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'explorer-unrelated-'));
+    const target = fakeTarget(directory);
+    target.cli.source = 'package-manager';
+    const discovery = new DiscoveryService({ workspaceState: { get: () => undefined, update: async () => undefined } } as unknown as vscode.ExtensionContext);
+    (discovery as unknown as { targets: RunTarget[] }).targets = [target];
+    let calls = 0;
+    discovery.refreshTargets = async () => [target];
+    discovery.discover = async () => { calls++; return undefined; };
+    try {
+      await discovery.refreshInventory();
+      assert.strictEqual(calls, 0);
+      target.configFile = path.join(directory, 'playwright.config.ts');
+      await discovery.refreshInventory();
+      assert.strictEqual(calls, 1);
+    } finally {
+      delayedDisposals.push(discovery);
       await fs.rm(directory, { recursive: true, force: true });
     }
   });

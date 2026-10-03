@@ -4,11 +4,21 @@
   <img src="public/icon.png" width="128" alt="Playwright CodeLens Runner icon">
 </p>
 
-Run, debug, inspect, and open Playwright tests in UI mode directly from the editor line where each test is declared.
+Browse every Playwright test in Test Explorer, or run, debug, inspect, and open tests in UI mode from the editor line where each test is declared.
 
 Version 4.2 unifies Run actions with a configurable backend and makes companion CLI runs the default. Choose Microsoft's Playwright extension through `run.backend`; Debug continues using Microsoft Testing.
 
 Playwright CodeLens Runner is a CodeLens companion to [Playwright Test for VS Code](https://marketplace.visualstudio.com/items?itemName=ms-playwright.playwright). Microsoft's official extension remains the only native test provider; this extension adds convenient CodeLens actions and carefully scoped Playwright CLI tools.
+
+## Test Explorer
+
+Open the **Playwright** Activity Bar icon to see **Test Explorer** with live run results, a **Run History & Sessions** group, and a separate Artifacts view. Tests load automatically across all Playwright configs and workspace roots, without opening their source files. Under each config, expand folders to browse the project's directory structure, then files, nested suites, and individual tests. Files show their filenames; folders follow paths relative to the workspace root. Folders and files share alphabetical order. Click a file, suite, or test to open its source; use its inline **Run** or **Debug** action to execute it.
+
+Discovery uses Playwright itself, including custom test patterns and loop-generated cases. Project names, tags, and skipped status appear in tooltips. All discovered projects are listed independently of the projects selected for execution. Configless projects are scanned when a Playwright Test dependency is declared or locally installed, or when a custom CLI is configured.
+
+**Run** follows `playwrightCodeLensRunner.run.backend` and defaults to the companion runner, with results directly on the tests in **Test Explorer**. **Debug** uses Microsoft's extension and VS Code Testing. Each generated case is listed separately: companion Run selects the exact case, while **Run Declaration** (with the official backend) and **Debug Declaration** target the cases at its shared source declaration. Microsoft actions use Microsoft's configured projects and config selection.
+
+Saved edits, file creation/deletion, config changes, and configured fixture/data watch patterns refresh the inventory automatically. The previous tree remains visible while refreshing; outdated entries cannot run until discovery succeeds. Failures show **Retry Discovery** and **Discovery Details** under the affected config. Use the view's **Refresh** and **Collapse All** controls, or **Playwright: Open Test Explorer** from Command Palette. Navigation remains available on retained rows after discovery failures.
 
 ## CodeLens at a glance
 
@@ -40,7 +50,7 @@ For example:
 }
 ```
 
-**Run uses the companion CLI runner by default**, with live CodeLens status and results in **Playwright Runs**. Choose Microsoft's Playwright extension for Run instead with:
+**Run uses the companion CLI runner by default**, with live CodeLens status and results in **Test Explorer**. Choose Microsoft's Playwright extension for Run instead with:
 
 ```json
 {
@@ -54,7 +64,7 @@ Loop-generated tests remain one declaration. Run with either backend, Microsoft 
 
 | Action | Execution owner | Result location |
 | --- | --- | --- |
-| Run (default) | Playwright CodeLens Runner | Playwright Runs sidebar, live CodeLens status, and CLI output |
+| Run (default) | Playwright CodeLens Runner | Test Explorer, live CodeLens status, and colored CLI output |
 | Run (`official`) / Debug | Microsoft Playwright extension | VS Code Testing, gutter, output, duration, and debugger |
 | Inspect | Playwright CodeLens Runner | Playwright Inspector and an integrated terminal |
 | Playwright UI | Playwright CodeLens Runner | Playwright UI and an integrated terminal |
@@ -65,7 +75,7 @@ Loop-generated tests remain one declaration. Run with either backend, Microsoft 
 
 **Flake Lab** is a companion CLI run for the current file, suite, test, or generated-case declaration. It deliberately does not create a native VS Code test run. By default it uses `--repeat-each 10`, `--workers 1`, `--retries 1`, `--trace on`, and `--fail-on-flaky-tests`; the last flag requires Playwright Test 1.52 or later.
 
-The **Playwright Runs** sidebar retains the latest companion summary, its totals and failures, and tracks each Playwright worker from exact test start/end events. Concurrent runs show completed and active counts (for example, `3/10 completed · 5 running`), while each finished test receives its result immediately without changing the status of tests that are still running. Flake Lab keeps one row per source test and aggregates its repetitions into live completed/running counts and final clean, flaky, failed, or skipped outcomes. The view also provides **Rerun Failed** and links back to Microsoft Testing for native results. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide this managed Runs view and launch Companion runs, Flake Lab, or cached failed-test reruns directly in an integrated terminal instead. Terminal-only runs use the generated Playwright arguments without the managed reporters or summary updates; the Artifacts view remains available.
+The **Test Explorer** shows running, passed, failed, flaky, and skipped icons on tests, with durations and aggregate status on their files, suites, and folders. A summary above the tree shows current progress or the last result. Hover a failed test for its error, or use **Show Test Run Output** to open its colored output. A narrow rerun preserves other tests’ results while their runs remain in history. Expand **Run History & Sessions** below the test inventory for retained summaries, totals, failures, and active UI/report sessions. Concurrent runs show completed and active counts (for example, `3/10 completed · 5 running`), while each finished test receives its result immediately without changing the status of tests that are still running. Flake Lab keeps one row per source test and aggregates its repetitions into live completed/running counts and final clean, flaky, failed, or skipped outcomes. The explorer toolbar provides **Stop**, **Rerun Failed**, and **Show Companion Output**. Its menu includes Flake Lab, Clear History, and Microsoft Testing. Set `playwrightCodeLensRunner.sidebar.runsEnabled` to `false` to hide managed result decorations and history and launch Companion runs, Flake Lab, or cached failed-test reruns directly in an integrated terminal instead. The test inventory remains available. Terminal-only runs use the generated Playwright arguments without the managed reporters or summary updates; the Artifacts view remains available.
 
 Live reporter events are processed in order and published to CodeLens and the sidebar in batches of up to 100 ms. Run start and final results publish immediately. Concurrent runs keep their launch order, and clearing history retains active runs and their cancellation controls. The history-size setting limits completed runs.
 
@@ -77,7 +87,7 @@ Tag actions use discovered `@tags` and structured `--grep @tag` arguments for UI
 
 The **Playwright Artifacts** view scans only configured target directories and the local `playwright-report`, `blob-report`, and `test-results` roots by default. It ranks HTML reports, report ZIPs, traces, blob-report ZIPs, and test-result attachments newest-first. Open or reveal artifacts from the view, merge blob reports with `playwright merge-reports --reporter html`, and reopen the generated report.
 
-Configs sharing artifact roots share one scan. Opening a shared report or trace asks which CLI config to use. Each history row's **View CLI Output** opens that run's retained output tail (up to 24,000 characters) in a read-only document; **Show Companion Output** still opens the combined live output channel.
+Configs sharing artifact roots share one scan. Opening a shared report or trace asks which CLI config to use. Each history row’s **View CLI Output** opens that run’s retained output tail (up to 24,000 characters) in a read-only terminal. Live output preserves Playwright’s colors, assertion diffs, and highlighted code frames, with one stable line per completed test. Concurrent runs have separate output terminals; reopening a terminal resumes that run’s output. **Show Companion Output** opens the latest run. `companion.showCliOutput` controls automatic opening (`on-run`, `on-failure`, or `never`); closing the output terminal does not cancel the run—use **Stop** in Test Explorer.
 
 Remote UI profiles add `--ui-host` and `--ui-port` safely as CLI arguments:
 
@@ -90,7 +100,7 @@ Remote UI profiles add `--ui-host` and `--ui-port` safely as CLI arguments:
 }
 ```
 
-Non-loopback profiles display a network-exposure warning before launch. The extension focuses its companion view after companion actions and Microsoft Testing after native Run/Debug by default; set `playwrightCodeLensRunner.sidebar.autoFocus` to `false` to opt out. View placement remains entirely under VS Code and user control.
+Non-loopback profiles display a network-exposure warning before launch. The extension focuses Test Explorer after companion actions and Microsoft Testing after native Run/Debug by default; set `playwrightCodeLensRunner.sidebar.autoFocus` to `false` to opt out. View placement remains entirely under VS Code and user control.
 
 Run and Debug delegate to VS Code Testing, so editor actions update the same Microsoft-owned test results as the Testing view. Inspector and UI intentionally remain standalone CLI sessions and do not create duplicate native test runs.
 
@@ -120,9 +130,9 @@ Run and Debug delegate to VS Code Testing, so editor actions update the same Mic
 
 1. Install **Playwright CodeLens Runner**. VS Code also installs Microsoft's required Playwright extension.
 2. Open a trusted workspace containing a Playwright config or test file.
-3. Configure native projects and browsers in Microsoft's Testing view.
-4. Open a `*.spec.*` or `*.test.*` file and use its CodeLens actions.
-5. Optionally run **Playwright: Configure CLI Projects** for Inspector and Playwright UI.
+3. Open **Playwright → Test Explorer** to browse all tests, then click **Run** or **Debug** beside a file, suite, or test.
+4. Configure native projects and browsers in Microsoft's Testing view, or use **Playwright: Configure CLI Projects** for companion runs, Inspector, and Playwright UI.
+5. Open a test file to use its CodeLens actions directly in the editor.
 
 Conventional `playwright*.config.{js,cjs,mjs,ts,cts,mts}` files are discovered automatically, including variants such as `playwright.no-db.config.ts` and `playwright.pdf.config.ts`. For any other filename, list it explicitly in `playwrightCodeLensRunner.configFiles`. Custom test patterns, configless workspaces, multi-root workspaces, and nested monorepos are also supported.
 
@@ -189,7 +199,7 @@ Open the Command Palette and search for **Playwright**:
 - **Run Flake Lab** / **Rerun Failed Companion Tests**
 - **Open Changed Tests in Playwright UI** / **Open Last Failed Tests in Playwright UI**
 - **Tag Actions…** / **Open Playwright UI Profile…**
-- **Open Playwright Runs** / **Open Playwright Artifact Center**
+- **Open Playwright Run History** / **Open Playwright Artifact Center**
 - **Open Latest Playwright Report** / **Open Latest Playwright Trace** / **Merge Playwright Blob Reports**
 - **Show HTML Report** / **Show Trace**
 - **Record New Test (Codegen)**
@@ -225,7 +235,7 @@ All commands and settings live in the `playwrightCodeLensRunner.*` namespace. Ve
 | `playwrightCodeLensRunner.ui.profiles` | Named remote UI host/port profiles | `[]` |
 | `playwrightCodeLensRunner.ui.defaultProfile` | Profile used for normal UI actions | empty |
 | `playwrightCodeLensRunner.sidebar.autoFocus` | Focus the action owner’s view | `true` |
-| `playwrightCodeLensRunner.sidebar.runsEnabled` | Capture companion run summaries in the Runs sidebar; disable for terminal-only execution | `true` |
+| `playwrightCodeLensRunner.sidebar.runsEnabled` | Show live results and history in Test Explorer; disable for terminal-only execution | `true` |
 | `playwrightCodeLensRunner.artifacts.scanDirectories` | Local artifact roots per target | `playwright-report`, `blob-report`, `test-results` |
 | `playwrightCodeLensRunner.codeLens.enabled` | Enable editor actions | `true` |
 | `playwrightCodeLensRunner.codeLens.pattern` | Files receiving CodeLens actions | `**/*.{test,spec}.{js,jsx,ts,tsx,mjs,cjs,mts,cts}` |
@@ -253,6 +263,7 @@ npm run lint           # ESLint, zero warnings allowed
 npm run check:unused   # Knip
 npm run test:reporter  # Reporter compatibility against supported Playwright fixtures
 npm run benchmark:core # Warmed median timings for 250, 1,000, and 2,000 tests
+npm run benchmark:explorer # Compare live result projection against its frozen baseline
 npm test
 npm run package
 npm run vsix
@@ -263,6 +274,8 @@ npm run vsix
 Push a `v`-prefixed tag matching the `package.json` version (for example, `v4.0.0`). The release workflow runs the test suite, builds the VSIX, and attaches it to a GitHub Release with generated release notes.
 
 The core benchmark is separate from unit-test gates. It measures reporter planning, all test-status lookups (including index construction), final-report reconciliation, and generated cases sharing one source declaration using three warmup runs and seven measured runs. Compare results on the same machine; real workspace discovery also depends on Playwright and test configuration.
+
+The [Test Explorer benchmark](benchmarks/explorer-results.md) compares the current result projector against a frozen copy of its previous implementation, with 1,000, 10,000, and 30,000 tests. It measures cold projection, changing live snapshots, narrow reruns, replacement inventories, and empty history. Every snapshot's complete result map must match the baseline. To capture medians, p95 timings, raw samples, and machine details, run `npm run benchmark:explorer -- --output benchmarks/explorer-results.json`.
 
 ### TypeScript 7 and TypeScript 6 side by side
 

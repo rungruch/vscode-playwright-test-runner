@@ -51,6 +51,8 @@ export interface DiscoveredConfig {
   cwd: string;
   /** Playwright rootDir reported by discovery, defaults to cwd. */
   rootDir: string;
+  /** Reported project test directories, which can be outside rootDir/workspace. */
+  testDirs?: string[];
   /** Project names known to this config (empty until first discovery). */
   projects: string[];
   files: DiscoveredFile[];

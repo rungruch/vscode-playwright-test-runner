@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { detectPackageManager, findLocalPlaywrightCli, findPackageRoot } from '../../core/packageManager';
+import { detectPackageManager, findLocalPlaywrightCli, findPackageRoot, hasPlaywrightTest } from '../../core/packageManager';
 import { environmentForCli, packageManagerCommand, resolveCli } from '../../core/cliResolution';
 
 function makeTempDir(): string {
@@ -68,6 +68,35 @@ suite('packageManager', () => {
     fs.writeFileSync(path.join(cliDir, 'cli.js'), '');
     const found = findLocalPlaywrightCli(root);
     assert.strictEqual(found, path.join(cliDir, 'cli.js'));
+  });
+
+  test('recognizes declared configless Test dependencies before installation', () => {
+    const sub = path.join(root, 'packages', 'app');
+    fs.mkdirSync(sub, { recursive: true });
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ devDependencies: { '@playwright/test': '^1.38.0' } }));
+    assert.ok(hasPlaywrightTest(sub));
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ dependencies: { playwright: '^1.38.0' } }));
+    assert.ok(hasPlaywrightTest(root));
+  });
+
+  test('recognizes hoisted local Test installations and excludes playwright-core alone', () => {
+    const sub = path.join(root, 'packages', 'app');
+    fs.mkdirSync(sub, { recursive: true });
+    const core = path.join(root, 'node_modules', 'playwright-core');
+    fs.mkdirSync(core, { recursive: true });
+    fs.writeFileSync(path.join(core, 'cli.js'), '');
+    assert.ok(!hasPlaywrightTest(sub));
+    const test = path.join(root, 'node_modules', '@playwright', 'test');
+    fs.mkdirSync(test, { recursive: true });
+    fs.writeFileSync(path.join(test, 'cli.js'), '');
+    assert.ok(hasPlaywrightTest(sub));
+  });
+
+  test('does not identify unrelated or malformed packages as Test projects', () => {
+    fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ devDependencies: { jest: '*' } }));
+    assert.ok(!hasPlaywrightTest(root));
+    fs.writeFileSync(path.join(root, 'package.json'), '{broken');
+    assert.ok(!hasPlaywrightTest(root));
   });
 });
 

@@ -33,6 +33,7 @@ import { ReportSessionManager } from './reportSession';
 import { RunTarget, targetLabel } from './runTarget';
 import { Settings } from './settings';
 import { PlaywrightSidebar } from './sidebar';
+import { ExplorerElement, PlaywrightTestExplorer } from './testExplorer';
 
 export interface CommandDeps {
   context: vscode.ExtensionContext;
@@ -44,6 +45,7 @@ export interface CommandDeps {
   sessions: InteractiveSessionManager;
   reportSession: ReportSessionManager;
   sidebar: PlaywrightSidebar;
+  explorer: PlaywrightTestExplorer;
 }
 
 export function registerCommands(deps: CommandDeps): void {
@@ -55,6 +57,22 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.refreshTests', async () => {
     await Promise.all([deps.bridge.refresh(), deps.discovery.refreshAll()]);
   });
+  register('playwrightCodeLensRunner.openTestExplorer', () => vscode.commands.executeCommand('playwrightCodeLensRunner.testsView.focus'));
+  register('playwrightCodeLensRunner.refreshTestExplorer', () => deps.explorer.refresh());
+  register('playwrightCodeLensRunner.retryExplorerDiscovery', (element?: ExplorerElement) => (
+    element && 'targetId' in element ? deps.explorer.refresh(element.targetId) : undefined
+  ));
+  register('playwrightCodeLensRunner.explorerDiscoveryDetails', (element?: ExplorerElement) => {
+    if (element && 'targetId' in element) {
+      deps.discovery.showDiagnostics(element.targetId);
+    }
+  });
+  register('playwrightCodeLensRunner.openExplorerItem', (element?: ExplorerElement) => openExplorerItem(element));
+  register('playwrightCodeLensRunner.showExplorerOutput', (element?: ExplorerElement) => deps.explorer.showResultOutput(element));
+  register('playwrightCodeLensRunner.runExplorerItem', (element?: ExplorerElement) => executeExplorerItem(deps, element, 'run'));
+  register('playwrightCodeLensRunner.runExplorerDeclaration', (element?: ExplorerElement) => executeExplorerItem(deps, element, 'run'));
+  register('playwrightCodeLensRunner.debugExplorerItem', (element?: ExplorerElement) => executeExplorerItem(deps, element, 'debug'));
+  register('playwrightCodeLensRunner.debugExplorerDeclaration', (element?: ExplorerElement) => executeExplorerItem(deps, element, 'debug'));
   register('playwrightCodeLensRunner.configureProjects', () => deps.projects.configure());
   register('playwrightCodeLensRunner.openOfficialSettings', () => deps.bridge.openOfficialSettings());
   register('playwrightCodeLensRunner.rerunLast', () => deps.bridge.rerunLast());
@@ -81,7 +99,7 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.openChangedUi', (selection?: EditorTestSelection) => changedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.openLastFailedUi', (selection?: EditorTestSelection) => lastFailedUiCommand(deps, selection));
   register('playwrightCodeLensRunner.tagActions', (selection?: EditorTestSelection) => tagActionsCommand(deps, selection));
-  register('playwrightCodeLensRunner.openRunsView', () => focusCompanionView());
+  register('playwrightCodeLensRunner.openRunsView', () => deps.explorer.showHistory());
   register('playwrightCodeLensRunner.rerunFailedCli', (arg?: unknown) => rerunFailedCommand(deps, arg));
   register('playwrightCodeLensRunner.openArtifactCenter', () => artifactCenterCommand(deps));
   register('playwrightCodeLensRunner.openLatestReport', () => openLatestReportCommand(deps));
@@ -90,8 +108,12 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.openUiProfile', (selection?: EditorTestSelection) => openUiProfileCommand(deps, selection));
   register('playwrightCodeLensRunner.openArtifact', (artifact: ArtifactRecord) => openArtifactCommand(deps, artifact));
   register('playwrightCodeLensRunner.revealArtifact', (artifact: ArtifactRecord) => revealArtifactCommand(artifact));
-  register('playwrightCodeLensRunner.openFailure', (failure: CompanionFailure) => openFailureCommand(failure));
-  register('playwrightCodeLensRunner.showCompanionOutput', (runId?: string) => deps.runner.showOutput(runId));
+  register('playwrightCodeLensRunner.openFailure', (arg: CompanionFailure | ExplorerElement) => {
+    if (!arg) { return; }
+    const item = unwrapRunItem(arg) as CompanionFailure | { failure: CompanionFailure };
+    return openFailureCommand('failure' in item ? item.failure : item);
+  });
+  register('playwrightCodeLensRunner.showCompanionOutput', (arg?: unknown) => deps.runner.showOutput(runIdFromArg(arg)));
   register('playwrightCodeLensRunner.openMicrosoftTesting', () => vscode.commands.executeCommand('workbench.view.extension.test'));
 
   register('playwrightCodeLensRunner.stopInteractiveSession', () => deps.sessions.stop());
@@ -100,6 +122,42 @@ export function registerCommands(deps: CommandDeps): void {
   register('playwrightCodeLensRunner.showReport', () => showReportCommand(deps));
   register('playwrightCodeLensRunner.showTrace', (uri?: vscode.Uri) => showTraceCommand(deps, uri));
   register('playwrightCodeLensRunner.recordTest', (uri?: vscode.Uri) => recordTestCommand(deps, uri));
+}
+
+async function openExplorerItem(element: ExplorerElement | undefined): Promise<void> {
+  if (!element || !('selection' in element) || !element.selection) {
+    return;
+  }
+  const selection = element.selection;
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(selection.uri));
+  const position = document.validatePosition(new vscode.Position(selection.position.line, selection.position.character));
+  await vscode.window.showTextDocument(document, { preview: true, selection: new vscode.Range(position, position) });
+}
+
+async function executeExplorerItem(
+  deps: CommandDeps, element: ExplorerElement | undefined, mode: 'run' | 'debug',
+): Promise<void> {
+  const requested = element && deps.explorer.selectionFor(element);
+  if (!requested) {
+    void vscode.window.showInformationMessage('This test inventory changed or is unavailable. Refresh Test Explorer and choose the current action.');
+    return;
+  }
+  try {
+    const prepared = await prepareCompanionSelection(deps, requested);
+    if (!prepared || !selectionStillCurrent(deps, prepared.target, prepared.selection)) {
+      return;
+    }
+    const selection = prepared.selection;
+    if (mode === 'run') {
+      await runCommand(deps, selection, selection.kind === 'file' ? 'file' : 'test');
+    } else if (selection.kind === 'file') {
+      await delegatedFileCommand(deps, selection, 'debug');
+    } else {
+      await delegatedTestCommand(deps, selection, 'debug');
+    }
+  } catch (error) {
+    void vscode.window.showErrorMessage(`Could not prepare the selected Playwright test: ${errorMessage(error)}`);
+  }
 }
 
 /** Dispatch normal runs using the selected file's current backend setting. */
@@ -516,7 +574,12 @@ async function flakeLabWithSizeCommand(
   await flakeLabCommand(deps, selection, { size: picked.size, repeatEach });
 }
 
+function unwrapRunItem(arg: unknown): unknown {
+  return arg && typeof arg === 'object' && 'runElement' in arg ? arg.runElement : arg;
+}
+
 function runIdFromArg(arg: unknown): string | undefined {
+  arg = unwrapRunItem(arg);
   if (typeof arg === 'string') {
     return arg;
   }
@@ -551,6 +614,7 @@ async function flakeSingleCompanionTestCommand(deps: CommandDeps, arg?: unknown)
 }
 
 function testSelectionFromTreeArg(arg: unknown): EditorTestSelection | undefined {
+  arg = unwrapRunItem(arg);
   if (!arg || typeof arg !== 'object') {
     return undefined;
   }
@@ -1186,7 +1250,7 @@ async function focusCompanionFor(target: RunTarget): Promise<void> {
 
 async function focusCompanionView(): Promise<void> {
   await vscode.commands.executeCommand('workbench.view.extension.playwrightCodeLensRunner');
-  await vscode.commands.executeCommand('playwrightCodeLensRunner.runsView.focus').then(undefined, () => undefined);
+  await vscode.commands.executeCommand('playwrightCodeLensRunner.testsView.focus').then(undefined, () => undefined);
 }
 
 async function focusNativeResults(file: string | undefined): Promise<void> {

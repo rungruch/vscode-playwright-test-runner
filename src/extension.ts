@@ -9,6 +9,7 @@ import { OfficialPlaywrightBridge } from './officialPlaywrightBridge';
 import { ProjectPicker } from './projectPicker';
 import { ReportSessionManager } from './reportSession';
 import { PlaywrightSidebar } from './sidebar';
+import { PlaywrightTestExplorer } from './testExplorer';
 
 export interface ExtensionApi {
   discovery: DiscoveryService;
@@ -16,6 +17,7 @@ export interface ExtensionApi {
   bridge: OfficialPlaywrightBridge;
   runner: CompanionCliRunner;
   artifacts: ArtifactService;
+  explorer: PlaywrightTestExplorer;
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<ExtensionApi | undefined> {
@@ -31,18 +33,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<Extens
   const sessions = new InteractiveSessionManager();
   const reportSession = new ReportSessionManager();
   const sidebar = new PlaywrightSidebar(context, runner, artifacts, sessions, reportSession);
+  const explorer = new PlaywrightTestExplorer(discovery, runner, sidebar);
 
-  context.subscriptions.push(discovery, runner, artifacts, sessions, reportSession);
-  registerCommands({ context, discovery, bridge, projects, runner, artifacts, sessions, reportSession, sidebar });
+  context.subscriptions.push(explorer, discovery, runner, artifacts, sessions, reportSession);
+  registerCommands({ context, discovery, bridge, projects, runner, artifacts, sessions, reportSession, sidebar, explorer });
   registerCodeLensSupport(context, discovery, runner);
 
+  void explorer.initialize();
   await bridge.activate();
-  void discovery.refreshTargets().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    void vscode.window.showErrorMessage(`Playwright target discovery failed: ${message}`);
-  });
 
-  return { discovery, projects, bridge, runner, artifacts };
+  return { discovery, projects, bridge, runner, artifacts, explorer };
 }
 
 export function deactivate(): void {

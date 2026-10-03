@@ -84,6 +84,24 @@ suite('multi-root workspace discovery', () => {
     }
   });
 
+  test('lists both workspace roots and keeps overlapping configs distinct in Test Explorer', async () => {
+    await api.explorer.initialize();
+    const workspaces = api.explorer.getChildren().filter((node) => node.kind === 'workspace');
+    assert.strictEqual(workspaces.length, 2);
+    const configs = workspaces.flatMap((workspace) => api.explorer.getChildren(workspace));
+    assert.strictEqual(configs.length, 5);
+    assert.strictEqual(new Set(configs.map((node) => node.id)).size, 5);
+    for (const config of configs) {
+      const descendants = (node: Parameters<typeof api.explorer.getChildren>[0]): ReturnType<typeof api.explorer.getChildren> =>
+        api.explorer.getChildren(node).flatMap((child) => [child, ...descendants(child)]);
+      const files = descendants(config).filter((node) => node.kind === 'file');
+      assert.strictEqual(files.length, 1);
+      const tests = files.flatMap((file) => api.explorer.getChildren(file));
+      assert.strictEqual(tests.length, 1);
+      assert.ok(api.explorer.selectionFor(tests[0]));
+    }
+  });
+
   test('scopes target identities by workspace even for one shared config', () => {
     const folders = vscode.workspace.workspaceFolders;
     assert.ok(folders?.[0] && folders[1]);

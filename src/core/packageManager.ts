@@ -87,3 +87,34 @@ export function findLocalPlaywrightCli(startDir: string, stopDir?: string): stri
     current = parent;
   }
 }
+
+/** Identifies configless Test projects without invoking a package manager. */
+export function hasPlaywrightTest(startDir: string): boolean {
+  let current = path.resolve(startDir);
+  for (;;) {
+    for (const name of ['@playwright/test', 'playwright']) {
+      if (fs.existsSync(path.join(current, 'node_modules', name, 'cli.js'))) {
+        return true;
+      }
+    }
+    try {
+      const manifest = JSON.parse(fs.readFileSync(path.join(current, 'package.json'), 'utf8')) as {
+        dependencies?: Record<string, unknown>;
+        devDependencies?: Record<string, unknown>;
+        optionalDependencies?: Record<string, unknown>;
+      };
+      if ([manifest.dependencies, manifest.devDependencies, manifest.optionalDependencies]
+        .some((dependencies) => dependencies && ['@playwright/test', 'playwright']
+          .some((name) => typeof dependencies[name] === 'string'))) {
+        return true;
+      }
+    } catch {
+      // Missing or invalid manifests do not identify a Playwright project.
+    }
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return false;
+    }
+    current = parent;
+  }
+}

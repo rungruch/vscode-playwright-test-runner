@@ -2,7 +2,7 @@
   "name": "playwright-codelens-runner",
   "displayName": "Playwright CodeLens Runner",
   "description": "Playwright CodeLens actions with companion or official Run, official Debug, and scoped Inspector/UI commands",
-  "version": "4.2.0",
+  "version": "4.5.0",
   "publisher": "rungruch",
   "author": {
     "name": "rungruch"
@@ -163,13 +163,16 @@
           },
           "playwrightCodeLensRunner.run.backend": {
             "type": "string",
-            "enum": ["companion", "official"],
+            "enum": [
+              "companion",
+              "official"
+            ],
             "enumDescriptions": [
               "Run with this extension's Playwright CLI runner and companion results.",
               "Run with Playwright Test for VS Code and Microsoft Testing results."
             ],
             "default": "companion",
-            "markdownDescription": "Backend for Run actions in CodeLens, More…, Command Palette, and the editor Run File button. Debug always uses the Microsoft Playwright extension.",
+            "markdownDescription": "Backend for Run actions in Test Explorer, CodeLens, More…, Command Palette, and the editor Run File button. Debug always uses the Microsoft Playwright extension.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.companion.showCliOutput": {
@@ -180,7 +183,7 @@
               "never"
             ],
             "default": "on-run",
-            "markdownDescription": "Controls when to show the Playwright CodeLens Runner output channel during companion CLI runs.",
+            "markdownDescription": "Controls when to show the colored, read-only output terminal for each companion CLI run.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.companion.browser": {
@@ -303,13 +306,13 @@
           "playwrightCodeLensRunner.sidebar.autoFocus": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Focus Microsoft Testing after native Run/Debug and the companion Playwright view after companion actions.",
+            "markdownDescription": "Focus Microsoft Testing after native Run/Debug and the Playwright Test Explorer after companion actions.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.sidebar.runsEnabled": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Capture Flake Lab and failed-test rerun results in the Playwright Runs sidebar. When disabled, those generated commands run directly in an integrated terminal without managed summaries.",
+            "markdownDescription": "Capture companion Run, Flake Lab, and failed-test rerun results in Test Explorer. When disabled, those generated commands run directly in an integrated terminal without managed summaries.",
             "scope": "window"
           },
           "playwrightCodeLensRunner.sidebar.historySize": {
@@ -317,7 +320,7 @@
             "minimum": 1,
             "maximum": 10,
             "default": 3,
-            "markdownDescription": "Number of completed companion CLI runs retained in the Playwright Runs sidebar. Active runs are retained until completion.",
+            "markdownDescription": "Number of completed companion CLI runs retained in Test Explorer’s Run History & Sessions group. Active runs are retained until completion.",
             "scope": "window"
           },
           "playwrightCodeLensRunner.artifacts.scanDirectories": {
@@ -355,7 +358,7 @@
             ],
             "enumDescriptions": [
               "Show the complete file, suite, and test action sets.",
-              "Show Run, Debug, and More\u2026 for every declaration.",
+              "Show Run, Debug, and More… for every declaration.",
               "Show Run, Inspect, UI, and Flake Lab without Debug. Run uses the selected run.backend.",
               "Use the fileActions, suiteActions, and testActions settings below."
             ],
@@ -388,7 +391,7 @@
           "playwrightCodeLensRunner.codeLens.showRunningStatus": {
             "type": "boolean",
             "default": true,
-            "markdownDescription": "Display a live running indicator ($(sync~spin) Running\u2026) while a companion test is executing.",
+            "markdownDescription": "Display a live running indicator ($(sync~spin) Running…) while a companion test is executing.",
             "scope": "resource"
           },
           "playwrightCodeLensRunner.codeLens.fastStaticDiscovery": {
@@ -491,6 +494,12 @@
     ],
     "commands": [
       {
+        "command": "playwrightCodeLensRunner.showExplorerOutput",
+        "title": "Show Test Run Output",
+        "category": "Playwright",
+        "icon": "$(output)"
+      },
+      {
         "command": "playwrightCodeLensRunner.refreshTests",
         "title": "Refresh Tests",
         "category": "Playwright",
@@ -561,7 +570,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.more",
-        "title": "More Playwright Actions\u2026",
+        "title": "More Playwright Actions…",
         "category": "Playwright"
       },
       {
@@ -602,7 +611,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.tagActions",
-        "title": "Tag Actions\u2026",
+        "title": "Tag Actions…",
         "category": "Playwright"
       },
       {
@@ -613,7 +622,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.openRunsView",
-        "title": "Open Playwright Runs",
+        "title": "Open Playwright Run History",
         "category": "Playwright",
         "icon": "$(list-flat)"
       },
@@ -649,7 +658,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.openUiProfile",
-        "title": "Open Playwright UI Profile\u2026",
+        "title": "Open Playwright UI Profile…",
         "category": "Playwright",
         "icon": "$(remote)"
       },
@@ -685,7 +694,7 @@
       },
       {
         "command": "playwrightCodeLensRunner.flakeLabWithSize",
-        "title": "Run Flake Lab with Size\u2026",
+        "title": "Run Flake Lab with Size…",
         "category": "Playwright",
         "icon": "$(beaker)"
       },
@@ -730,6 +739,60 @@
         "title": "Stop Interactive Session",
         "category": "Playwright",
         "icon": "$(stop)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openTestExplorer",
+        "title": "Open Test Explorer",
+        "category": "Playwright",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.refreshTestExplorer",
+        "title": "Refresh Test Explorer",
+        "category": "Playwright",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.retryExplorerDiscovery",
+        "title": "Retry Discovery",
+        "category": "Playwright",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.explorerDiscoveryDetails",
+        "title": "Discovery Details",
+        "category": "Playwright",
+        "icon": "$(output)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.openExplorerItem",
+        "title": "Open Test Source",
+        "category": "Playwright",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.runExplorerItem",
+        "title": "Run",
+        "category": "Playwright",
+        "icon": "$(play)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.runExplorerDeclaration",
+        "title": "Run Declaration",
+        "category": "Playwright",
+        "icon": "$(play)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.debugExplorerItem",
+        "title": "Debug",
+        "category": "Playwright",
+        "icon": "$(debug-alt)"
+      },
+      {
+        "command": "playwrightCodeLensRunner.debugExplorerDeclaration",
+        "title": "Debug Declaration",
+        "category": "Playwright",
+        "icon": "$(debug-alt)"
       }
     ],
     "viewsContainers": {
@@ -744,9 +807,8 @@
     "views": {
       "playwrightCodeLensRunner": [
         {
-          "id": "playwrightCodeLensRunner.runsView",
-          "name": "Playwright Runs",
-          "when": "config.playwrightCodeLensRunner.sidebar.runsEnabled"
+          "id": "playwrightCodeLensRunner.testsView",
+          "name": "Test Explorer"
         },
         {
           "id": "playwrightCodeLensRunner.artifactsView",
@@ -758,33 +820,33 @@
       "view/title": [
         {
           "command": "playwrightCodeLensRunner.cancelCompanionRun",
-          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "when": "view == playwrightCodeLensRunner.testsView && config.playwrightCodeLensRunner.sidebar.runsEnabled && playwrightCodeLensRunner.hasActiveRun",
           "group": "navigation@1"
         },
         {
           "command": "playwrightCodeLensRunner.rerunFailedCli",
-          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "when": "view == playwrightCodeLensRunner.testsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
           "group": "navigation@2"
         },
         {
           "command": "playwrightCodeLensRunner.flakeLab",
-          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
-          "group": "navigation@3"
+          "when": "view == playwrightCodeLensRunner.testsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "group": "companion@1"
         },
         {
           "command": "playwrightCodeLensRunner.showCompanionOutput",
-          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "when": "view == playwrightCodeLensRunner.testsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
           "group": "navigation@4"
         },
         {
           "command": "playwrightCodeLensRunner.clearRuns",
-          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
-          "group": "navigation@5"
+          "when": "view == playwrightCodeLensRunner.testsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "group": "companion@2"
         },
         {
           "command": "playwrightCodeLensRunner.openMicrosoftTesting",
-          "when": "view == playwrightCodeLensRunner.runsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
-          "group": "navigation@6"
+          "when": "view == playwrightCodeLensRunner.testsView && config.playwrightCodeLensRunner.sidebar.runsEnabled",
+          "group": "companion@3"
         },
         {
           "command": "playwrightCodeLensRunner.stopReportServer",
@@ -810,47 +872,57 @@
           "command": "playwrightCodeLensRunner.mergeBlobReports",
           "when": "view == playwrightCodeLensRunner.artifactsView",
           "group": "navigation@5"
+        },
+        {
+          "command": "playwrightCodeLensRunner.refreshTestExplorer",
+          "when": "view == playwrightCodeLensRunner.testsView",
+          "group": "navigation@0"
         }
       ],
       "view/item/context": [
         {
+          "command": "playwrightCodeLensRunner.showExplorerOutput",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem =~ /playwrightExplorer\\.executable.*\\.result/",
+          "group": "inline@3"
+        },
+        {
           "command": "playwrightCodeLensRunner.cancelCompanionRun",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionRun.running",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionRun.running",
           "group": "inline@1"
         },
         {
           "command": "playwrightCodeLensRunner.rerunFailedCli",
-          "when": "view == playwrightCodeLensRunner.runsView && (viewItem == playwrightCompanionRun || viewItem == playwrightCompanionRun.running)",
+          "when": "view == playwrightCodeLensRunner.testsView && (viewItem == playwrightCompanionRun || viewItem == playwrightCompanionRun.running)",
           "group": "inline@2"
         },
         {
           "command": "playwrightCodeLensRunner.showCompanionOutput",
-          "when": "view == playwrightCodeLensRunner.runsView && (viewItem == playwrightCompanionRun || viewItem == playwrightCompanionRun.running)",
+          "when": "view == playwrightCodeLensRunner.testsView && (viewItem == playwrightCompanionRun || viewItem == playwrightCompanionRun.running)",
           "group": "inline@3"
         },
         {
           "command": "playwrightCodeLensRunner.runSingleCompanionTest",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionTestCase",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionTestCase",
           "group": "inline@1"
         },
         {
           "command": "playwrightCodeLensRunner.flakeSingleCompanionTest",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionTestCase",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionTestCase",
           "group": "inline@2"
         },
         {
           "command": "playwrightCodeLensRunner.restartReportServer",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionReportSession",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionReportSession",
           "group": "inline@1"
         },
         {
           "command": "playwrightCodeLensRunner.stopReportServer",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionReportSession",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionReportSession",
           "group": "inline@2"
         },
         {
           "command": "playwrightCodeLensRunner.stopInteractiveSession",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionInteractiveSession",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionInteractiveSession",
           "group": "inline@1"
         },
         {
@@ -865,7 +937,7 @@
         },
         {
           "command": "playwrightCodeLensRunner.openFailure",
-          "when": "view == playwrightCodeLensRunner.runsView && viewItem == playwrightCompanionFailure",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightCompanionFailure",
           "group": "inline@1"
         },
         {
@@ -877,6 +949,70 @@
           "command": "playwrightCodeLensRunner.revealArtifact",
           "when": "view == playwrightCodeLensRunner.artifactsView && viewItem =~ /^playwrightArtifact\\./",
           "group": "inline@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.runExplorerItem",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem =~ /playwrightExplorer\\.executable/ && !(viewItem =~ /\\.generated\\.official/)",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.runExplorerDeclaration",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem =~ /playwrightExplorer\\.executable/ && viewItem =~ /\\.generated\\.official/",
+          "group": "inline@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.debugExplorerItem",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem =~ /playwrightExplorer\\.executable/ && !(viewItem =~ /\\.generated/)",
+          "group": "inline@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.debugExplorerDeclaration",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem =~ /playwrightExplorer\\.executable/ && viewItem =~ /\\.generated/",
+          "group": "inline@2"
+        },
+        {
+          "command": "playwrightCodeLensRunner.retryExplorerDiscovery",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightExplorer.config",
+          "group": "navigation@1"
+        },
+        {
+          "command": "playwrightCodeLensRunner.explorerDiscoveryDetails",
+          "when": "view == playwrightCodeLensRunner.testsView && viewItem == playwrightExplorer.config",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "playwrightCodeLensRunner.showExplorerOutput",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.openExplorerItem",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.runExplorerItem",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.runExplorerDeclaration",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.debugExplorerItem",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.debugExplorerDeclaration",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.retryExplorerDiscovery",
+          "when": "false"
+        },
+        {
+          "command": "playwrightCodeLensRunner.explorerDiscoveryDetails",
+          "when": "false"
         }
       ],
       "explorer/context": [
@@ -956,6 +1092,7 @@
     "test": "npm run test:unit && npm run test:extension",
     "test:unit": "npm run test:compile && mocha --config .mocharc.json",
     "benchmark:core": "npm run test:compile && node scripts/benchmark-core.mjs",
+    "benchmark:explorer": "npm run test:compile && node scripts/benchmark-explorer.mjs",
     "test:extension": "npm run package && npm run test:compile && npm run test:fixture && npm run test:reporter && vscode-test",
     "test:compile": "node scripts/clean-test-output.mjs && tsc -p ./ --stableTypeOrdering",
     "test:fixture": "npm ci --prefix fixtures/basic --ignore-scripts && npm ci --prefix fixtures/multipkg --ignore-scripts && npm ci --prefix fixtures/pw138 --ignore-scripts",

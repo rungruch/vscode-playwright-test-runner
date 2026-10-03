@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { CompanionOutput } from './companionOutput';
 import {
   lookupTestRunStatus,
   parseCompanionJsonReport,
@@ -15,6 +16,7 @@ import {
 } from './core/companionLive';
 import { CompanionCliRunRequest, CompanionRunSummary } from './core/companionTypes';
 import { combineRunBatches } from './core/companionBatches';
+import { quoteForTerminal } from './core/terminalQuote';
 import { spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 import { Settings } from './settings';
@@ -37,7 +39,8 @@ export interface CompanionTestsChange {
  * Testing API: Flake Lab and failed reruns are companion CLI sessions only.
  */
 export class CompanionCliRunner implements vscode.Disposable {
-  private readonly output = vscode.window.createOutputChannel('Playwright CodeLens Runner');
+  private readonly output = new CompanionOutput();
+  private readonly liveOutput = new Map<string, string>();
   private readonly emitter = new vscode.EventEmitter<CompanionRunSummary | undefined>();
   private readonly testsEmitter = new vscode.EventEmitter<CompanionTestsChange>();
   private persistence: Promise<void> = Promise.resolve();
@@ -47,9 +50,6 @@ export class CompanionCliRunner implements vscode.Disposable {
   private readonly reporterPath: string;
   private latest: CompanionRunSummary | undefined;
   private history: CompanionRunSummary[] = [];
-  private readonly outputDocuments: vscode.Disposable;
-  private readonly outputScheme = `playwright-run-output-${Math.random().toString(36).slice(2)}`;
-  private readonly outputChanged = new vscode.EventEmitter<vscode.Uri>();
 
   readonly onDidChange = this.emitter.event;
   readonly onDidChangeTests = this.testsEmitter.event;
@@ -64,14 +64,6 @@ export class CompanionCliRunner implements vscode.Disposable {
         tests: run.tests?.map((test) => test.status === 'running' ? { ...test, status: 'pending', activeRuns: 0 } : test),
       } : run);
     this.latest = this.history[0];
-    this.outputDocuments = vscode.workspace.registerTextDocumentContentProvider(this.outputScheme, {
-      onDidChange: this.outputChanged.event,
-      provideTextDocumentContent: (uri) => {
-        const run = this.history.find((candidate) => candidate.id === uri.query);
-        return run ? `Playwright ${run.kind} — ${run.status}\nConfig: ${run.configFile ?? run.cwd}\nStarted: ${new Date(run.startedAt).toISOString()}\nRetained output tail (up to ${OUTPUT_TAIL_LIMIT.toLocaleString('en-US')} characters):\n\n${run.output ?? '(No output captured.)'}`
-          : 'This run is no longer retained in history.';
-      },
-    });
   }
 
   get latestRun(): CompanionRunSummary | undefined {
@@ -159,10 +151,8 @@ export class CompanionCliRunner implements vscode.Disposable {
     // Publish synchronously; storage is serialized separately from process startup.
     void this.persist(summary, settings.sidebarHistorySize);
     if (settings.companionShowCliOutput === 'on-run') {
-      this.showOutput();
+      void this.showOutput(id);
     }
-    this.output.appendLine(`\n[${new Date(startedAt).toLocaleTimeString()}] ${request.kind} — ${target.configFile ?? target.cwd}`);
-    this.output.appendLine(this.commandPreview(target, request.args));
 
     const baseSummary = summary;
     let currentBatch = summary;
@@ -179,8 +169,10 @@ export class CompanionCliRunner implements vscode.Disposable {
       }
       collectedOutput = trimOutput(`${collectedOutput}${text}`);
       batchOutput = trimOutput(`${batchOutput}${text}`);
-      this.output.append(text);
+      this.liveOutput.set(id, collectedOutput);
+      this.output.append(id, text);
     };
+    appendVisible(`\x1b[2m${this.commandPreview(target, request.args)}\x1b[0m\n\n`);
     const publishLive = (next: CompanionRunSummary) => {
       if (next === currentBatch) {
         return;
@@ -246,10 +238,14 @@ export class CompanionCliRunner implements vscode.Disposable {
           }
         }
         const resultFile = path.join(tempDirectory, `result-${index}.json`);
-        const running = spawnCommand(target.cli, [...batch.args, `--reporter=line,json,${this.reporterPath}`], {
+        const running = spawnCommand(target.cli, [...batch.args, `--reporter=list,json,${this.reporterPath}`], {
           cwd: target.cwd,
           env: {
             ...request.env,
+            FORCE_COLOR: '1',
+            NO_COLOR: undefined,
+            DEBUG_COLORS: undefined,
+            PLAYWRIGHT_FORCE_TTY: '0',
             // Playwright's JSON reporter honours this path while stdout remains
             // a compatible fallback for older supported releases.
             PLAYWRIGHT_JSON_OUTPUT_NAME: resultFile,
@@ -286,13 +282,15 @@ export class CompanionCliRunner implements vscode.Disposable {
         output: trimOutput(collectedOutput),
       };
       if (!this.disposed) {
-        this.output.appendLine(`Companion run ${summary.status}: ${summary.passed}/${summary.total} passed, ${summary.failed} failed, ${summary.flaky} flaky.`);
-      }
-      if (!this.disposed && settings.companionShowCliOutput === 'on-failure' && (summary.status === 'failed' || summary.status === 'incomplete')) {
-        this.showOutput();
+        const color = summary.status === 'passed' ? (summary.flaky ? 33 : 32) : summary.status === 'cancelled' ? 33 : 31;
+        appendVisible(`\n\x1b[1;${color}mCompanion run ${summary.status}: ${summary.passed}/${summary.total} passed, ${summary.failed} failed, ${summary.flaky} flaky.\x1b[0m\n`);
+        summary.output = collectedOutput;
       }
       this.active.delete(id);
       await this.persist(summary, settings.sidebarHistorySize);
+      if (!this.disposed && settings.companionShowCliOutput === 'on-failure' && (summary.status === 'failed' || summary.status === 'incomplete')) {
+        this.output.show(summary);
+      }
       return summary;
     } catch (error) {
       clearLiveTimer();
@@ -302,22 +300,24 @@ export class CompanionCliRunner implements vscode.Disposable {
         ...summary,
         durationMs: Date.now() - startedAt,
         status: source.token.isCancellationRequested ? 'cancelled' : 'incomplete',
-        output: `${trimOutput(collectedOutput)}${error instanceof Error ? error.message : String(error)}`,
+        output: collectedOutput,
       };
       if (!this.disposed) {
-        this.output.appendLine(`Companion run could not start: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      if (!this.disposed && settings.companionShowCliOutput === 'on-failure') {
-        this.showOutput();
+        appendVisible(`\n\x1b[31mCompanion run could not start: ${error instanceof Error ? error.message : String(error)}\x1b[0m\n`);
+        summary.output = collectedOutput;
       }
       this.active.delete(id);
       await this.persist(summary, settings.sidebarHistorySize);
+      if (!this.disposed && settings.companionShowCliOutput === 'on-failure') {
+        this.output.show(summary);
+      }
       return summary;
     } finally {
       clearLiveTimer();
       cancellationListener?.dispose();
       source.dispose();
       this.active.delete(id);
+      this.liveOutput.delete(id);
       if (tempDirectory) {
         await fs.rm(tempDirectory, { recursive: true, force: true }).catch(() => undefined);
       }
@@ -335,21 +335,12 @@ export class CompanionCliRunner implements vscode.Disposable {
   }
 
   async showOutput(runId?: string): Promise<void> {
-    if (!runId) {
-      this.output.show(true);
-      return;
-    }
-    const run = this.history.find((candidate) => candidate.id === runId);
+    const run = runId ? this.history.find((candidate) => candidate.id === runId) : this.latest;
     if (!run) {
-      void vscode.window.showInformationMessage('This run is no longer retained in history.');
+      void vscode.window.showInformationMessage(runId ? 'This run is no longer retained in history.' : 'No companion CLI runs yet.');
       return;
     }
-    const uri = this.outputUri(run);
-    await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri), { preview: false });
-  }
-
-  private outputUri(run: CompanionRunSummary): vscode.Uri {
-    return vscode.Uri.from({ scheme: this.outputScheme, path: `/Playwright ${run.kind} ${run.id}.log`, query: run.id });
+    this.output.show({ ...run, output: this.liveOutput.get(run.id) ?? run.output });
   }
 
   dispose(): void {
@@ -359,8 +350,7 @@ export class CompanionCliRunner implements vscode.Disposable {
       clearTimeout(timer);
     }
     this.liveTimers.clear();
-    this.outputDocuments.dispose();
-    this.outputChanged.dispose();
+    this.liveOutput.clear();
     this.testsEmitter.dispose();
     this.output.dispose();
     this.emitter.dispose();
@@ -380,7 +370,6 @@ export class CompanionCliRunner implements vscode.Disposable {
     if (this.disposed) {
       return;
     }
-    this.outputChanged.fire(this.outputUri(summary));
     this.emitter.fire(summary);
     this.testsEmitter.fire({
       runId: summary.id,
@@ -403,14 +392,14 @@ export class CompanionCliRunner implements vscode.Disposable {
       await this.context.workspaceState.update(RUN_HISTORY_STATE_KEY, history);
     }).catch((error: unknown) => {
       if (!this.disposed) {
-        this.output.appendLine(`Could not save companion history: ${String(error)}`);
+        if (latest) { this.output.append(latest.id, `\nCould not save companion history: ${String(error)}\n`); }
       }
     });
     return this.persistence;
   }
 
   private commandPreview(target: RunTarget, args: string[]): string {
-    return [target.cli.executable, ...target.cli.argsPrefix, ...args, `--reporter=line,json,${this.reporterPath}`].join(' ');
+    return quoteForTerminal(target.cli.executable, [...target.cli.argsPrefix, ...args, `--reporter=list,json,${this.reporterPath}`]);
   }
 }
 

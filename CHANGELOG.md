@@ -1,5 +1,19 @@
 # Change Log
 
+## 4.5.0 - 2026-10-03
+
+- Introduce the **Playwright Test Explorer** tree view in the Playwright Activity Bar container, organizing tests across all configs, workspace-relative folders, test files, and nested suites without needing to open source documents.
+- Support multi-root workspaces and nested monorepos with workspace grouping and distinct config scoping.
+- Provide inline **Run** and **Debug** actions for files, suites, and tests in Test Explorer. Run uses the configured `run.backend` (companion CLI by default) with live outcome decorations; Debug delegates to Microsoft Playwright Testing.
+- List loop-generated and data-driven cases individually with project indicators, tags, and skip badges; companion Run selects the exact case, while Run/Debug Declaration actions target the shared source declaration.
+- Retain the existing inventory tree during refreshes, and provide inline **Retry Discovery** and **Discovery Details** actions when discovery fails.
+- Integrate **Run History & Sessions** directly into Test Explorer under a collapsible group, maintaining active and previous companion runs, interactive sessions, and failure navigation.
+- Render companion CLI output in colored, read-only terminals powered by a pseudoterminal (PTY), preserving ANSI colors, assertion diffs, and code frames from Playwright's `list` reporter without overwriting completed lines.
+- Buffer output until terminal connection, isolate concurrent runs in dedicated terminals, and add inline **Show Test Run Output** on Test Explorer result nodes.
+- Project live test, suite, file, and folder results with weak-reference caching, index reuse, single-pass tree rollups, and narrow rerun reconciliation.
+- Add `npm run benchmark:explorer` to measure and verify result projection against a frozen baseline across 1,000, 10,000, and 30,000 tests.
+- Watch project test directories outside `rootDir`, recognize declared or installed configless Test projects without spawning package managers, and coalesce inventory refreshes while preserving cached CLI version checks.
+
 ## 4.2.0 - 2026-10-02
 
 - Merge normal Run CodeLens actions into one configurable action. New resource-scoped `run.backend` defaults to `companion`; choose `official` for Microsoft Testing. Command Palette Run, editor Run File, and More… follow the same setting; Debug remains Microsoft-owned.

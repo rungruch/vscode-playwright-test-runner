@@ -43,8 +43,8 @@ suite('extension manifest', () => {
     assert.strictEqual(manifest.displayName, 'Playwright CodeLens Runner');
   });
 
-  test('declares the 4.2.0 release and platform floors', () => {
-    assert.strictEqual(manifest.version, '4.2.0');
+  test('declares the 4.5.0 release and platform floors', () => {
+    assert.strictEqual(manifest.version, '4.5.0');
     assert.strictEqual(manifest.engines?.vscode, '^1.125.0');
     assert.strictEqual(manifest.engines?.node, '>=22.13.0');
   });
@@ -177,12 +177,12 @@ suite('extension manifest', () => {
     ]);
     assert.deepStrictEqual(
       manifest.contributes?.views?.playwrightCodeLensRunner?.map((view) => view.id),
-      ['playwrightCodeLensRunner.runsView', 'playwrightCodeLensRunner.artifactsView'],
+      ['playwrightCodeLensRunner.testsView', 'playwrightCodeLensRunner.artifactsView'],
     );
     const views = manifest.contributes?.views?.playwrightCodeLensRunner ?? [];
     assert.strictEqual(
-      views.find((view) => view.id === 'playwrightCodeLensRunner.runsView')?.when,
-      'config.playwrightCodeLensRunner.sidebar.runsEnabled',
+      views.find((view) => view.id === 'playwrightCodeLensRunner.runsView'),
+      undefined,
     );
     assert.strictEqual(
       views.find((view) => view.id === 'playwrightCodeLensRunner.artifactsView')?.when,

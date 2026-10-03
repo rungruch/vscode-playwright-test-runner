@@ -12,7 +12,7 @@ import { DiscoveredConfig } from './core/model';
 import { targetsForChangedPath } from './core/refreshRouting';
 import { ScopedTaskQueue } from './core/scopedTaskQueue';
 import { isSupportedPlaywrightVersion } from './core/version';
-import { discoverRunTargets, isConfigFile, isTestFile, PLAYWRIGHT_CONFIG_GLOB } from './configDiscovery';
+import { discoverRunTargets, isConfigFile, isInventoryTarget, isTestFile, PLAYWRIGHT_CONFIG_GLOB } from './configDiscovery';
 import { probeCliVersion, spawnCommand } from './executor';
 import { RunTarget } from './runTarget';
 import { SETTINGS_NAMESPACE, Settings } from './settings';
@@ -34,6 +34,8 @@ export interface TargetDiscovery {
   model?: DiscoveredConfig;
   error?: string;
   scopeFile?: string;
+  /** The previous complete inventory is now stale, regardless of scope. */
+  invalidated?: boolean;
 }
 
 export interface DiscoveryDiagnostics {
@@ -59,6 +61,7 @@ export class DiscoveryService implements vscode.Disposable {
   private readonly testWatcherDisposables: vscode.Disposable[] = [];
   private readonly targetConfigWatcherDisposables: vscode.Disposable[] = [];
   private readonly emitter = new vscode.EventEmitter<TargetDiscovery>();
+  private readonly targetsEmitter = new vscode.EventEmitter<readonly RunTarget[]>();
   private readonly output = vscode.window.createOutputChannel('Playwright CodeLens Runner');
   private readonly context: vscode.ExtensionContext;
   private targets: RunTarget[] = [];
@@ -91,15 +94,31 @@ export class DiscoveryService implements vscode.Disposable {
   private fullRefreshRunning = false;
   private fullRefreshPending = false;
   private targetRefreshSequence = 0;
+  private inventorySubscribers = 0;
+  private readonly pendingInventory = new Set<string>();
+  private inventoryTimer: NodeJS.Timeout | undefined;
+  private readonly inventoryRoots = new Map<string, readonly string[]>();
+  private readonly inventoryWatchers = new Map<string, vscode.FileSystemWatcher>();
   private disposed = false;
 
   readonly onDidDiscover = this.emitter.event;
+  readonly onDidChangeTargets = this.targetsEmitter.event;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
     const configWatcher = vscode.workspace.createFileSystemWatcher(PLAYWRIGHT_CONFIG_GLOB);
+    const packageWatcher = vscode.workspace.createFileSystemWatcher('**/{package.json,package-lock.json,pnpm-lock.yaml,yarn.lock,bun.lock,bun.lockb}');
+    const packageChanged = (uri: vscode.Uri) => {
+      if (!uri.fsPath.split(path.sep).some((part) => part === 'node_modules' || part === '.git')) {
+        this.scheduleRefresh(uri.fsPath, true, true);
+      }
+    };
     this.disposables.push(
       configWatcher,
+      packageWatcher,
+      packageWatcher.onDidCreate(packageChanged),
+      packageWatcher.onDidChange(packageChanged),
+      packageWatcher.onDidDelete(packageChanged),
       vscode.workspace.onDidCloseTextDocument(() => {
         for (const target of this.targets) {
           this.trimFileCache(target.id);
@@ -151,6 +170,96 @@ export class DiscoveryService implements vscode.Disposable {
 
   get currentTargets(): RunTarget[] {
     return this.targets;
+  }
+
+  /** Keeps complete inventories current while a workspace explorer consumes them. */
+  subscribeInventory(): vscode.Disposable {
+    this.inventorySubscribers++;
+    for (const target of this.targets) {
+      this.queueInventory(target.id);
+    }
+    let released = false;
+    return new vscode.Disposable(() => {
+      if (released) {
+        return;
+      }
+      released = true;
+      this.inventorySubscribers--;
+      if (this.inventorySubscribers === 0) {
+        this.pendingInventory.clear();
+        clearTimeout(this.inventoryTimer);
+        this.inventoryTimer = undefined;
+        this.rebuildInventoryWatchers();
+      }
+    });
+  }
+
+  async refreshInventory(targetId?: string, force = true): Promise<void> {
+    await this.refreshTargets();
+    if (this.disposed) {
+      return;
+    }
+    const targets = this.targets.filter((target) => isInventoryTarget(target) && (!targetId || target.id === targetId));
+    await runWithConcurrency(targets, 4, (target) => this.discover(target, undefined, force));
+  }
+
+  private queueInventory(targetId: string): void {
+    const target = this.targets.find((candidate) => candidate.id === targetId);
+    if (this.disposed || this.inventorySubscribers === 0 || !target || !isInventoryTarget(target)) {
+      return;
+    }
+    this.pendingInventory.add(targetId);
+    if (this.inventoryTimer) {
+      return;
+    }
+    this.inventoryTimer = setTimeout(() => {
+      this.inventoryTimer = undefined;
+      const ids = [...this.pendingInventory];
+      this.pendingInventory.clear();
+      void Promise.all(ids.map(async (id) => {
+        const current = this.targets.find((candidate) => candidate.id === id);
+        if (!current || this.disposed || this.inventorySubscribers === 0 || !isInventoryTarget(current)) {
+          return;
+        }
+        const revision = this.revisionFor(id);
+        await this.discover(current);
+        if (!this.disposed && this.revisionFor(id) === revision && this.targets.includes(current)) {
+          this.emitter.fire({ target: current, model: this.cache.get(id), error: this.errorFor(id) });
+        }
+      })).catch((error: unknown) => {
+        this.output.appendLine(`Inventory refresh failed: ${errorMessage(error)}`);
+      });
+    }, 300);
+  }
+
+  /** Covers reported test directories, including custom filenames and cross-root testDir. */
+  private rebuildInventoryWatchers(): void {
+    const roots = this.inventorySubscribers > 0 ? new Set([...this.inventoryRoots.values()].flat()) : new Set<string>();
+    for (const [root, watcher] of this.inventoryWatchers) {
+      if (!roots.has(root)) {
+        watcher.dispose();
+        this.inventoryWatchers.delete(root);
+      }
+    }
+    for (const root of roots) {
+      if (this.inventoryWatchers.has(root) || this.disposed) {
+        continue;
+      }
+      const watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(root, '**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}'));
+      const changed = (uri: vscode.Uri, created: boolean) => {
+        if (path.relative(root, uri.fsPath).split(path.sep).some((part) =>
+          ['node_modules', '.git', 'out', 'dist', 'test-results', 'playwright-report', 'blob-report'].includes(part))) {
+          return;
+        }
+        const configChanged = isConfigFile(uri.fsPath) || this.targets.some((target) => target.configFile === uri.fsPath);
+        const owners = [...this.inventoryRoots].filter(([, directories]) => directories.includes(root)).map(([id]) => id);
+        this.scheduleRefresh(uri.fsPath, configChanged, created && !configChanged, owners);
+      };
+      watcher.onDidCreate((uri) => changed(uri, true));
+      watcher.onDidChange((uri) => changed(uri, false));
+      watcher.onDidDelete((uri) => changed(uri, false));
+      this.inventoryWatchers.set(root, watcher);
+    }
   }
 
   cachedModel(targetId: string): DiscoveredConfig | undefined {
@@ -247,12 +356,20 @@ export class DiscoveryService implements vscode.Disposable {
       }
     }
     this.targets = nextTargets;
+    for (const id of this.inventoryRoots.keys()) {
+      if (!next.has(id)) {
+        this.inventoryRoots.delete(id);
+      }
+    }
+    this.rebuildInventoryWatchers();
+    this.targetsEmitter.fire(this.targets);
     this.rebuildTargetConfigWatchers();
     for (const target of this.targets) {
       this.retiredTargetIds.delete(target.id);
     }
     for (const target of this.targets) {
       this.emitter.fire({ target, model: this.cache.get(target.id), error: this.errorFor(target.id) });
+      this.queueInventory(target.id);
     }
     return this.targets;
   }
@@ -401,6 +518,7 @@ export class DiscoveryService implements vscode.Disposable {
       target: picked.target,
       model: this.fileCache.get(discoveryKey(picked.target.id, fsPath)) ?? this.cache.get(picked.target.id),
       error: this.errorFor(picked.target.id, fsPath),
+      scopeFile: fsPath,
     });
     return picked.target;
   }
@@ -419,7 +537,11 @@ export class DiscoveryService implements vscode.Disposable {
       try {
         while (this.fullRefreshPending && !this.disposed) {
           this.fullRefreshPending = false;
-          await this.refreshAll();
+          if (this.inventorySubscribers > 0) {
+            await this.refreshInventory();
+          } else {
+            await this.refreshAll();
+          }
         }
       } catch (error) {
         this.output.appendLine(`Automatic discovery refresh failed: ${errorMessage(error)}`);
@@ -452,11 +574,11 @@ export class DiscoveryService implements vscode.Disposable {
   }
 
   /** Drops cached data for the target containing the given file. */
-  private scheduleRefresh(fsPath: string, rescanTargets = false, broad = false): void {
+  private scheduleRefresh(fsPath: string, rescanTargets = false, broad = false, ownerIds: readonly string[] = []): void {
     if (this.disposed) {
       return;
     }
-    const affected = this.changedTargets([{ path: fsPath, rescan: rescanTargets, broad }]);
+    const affected = this.changedTargets([{ path: fsPath, rescan: rescanTargets, broad, targetIds: [...ownerIds] }]);
     const pending = this.pendingRefreshes.get(fsPath);
     this.pendingRefreshes.set(fsPath, {
       rescan: (pending?.rescan ?? false) || rescanTargets,
@@ -571,6 +693,9 @@ export class DiscoveryService implements vscode.Disposable {
       }
     }
     await Promise.all(targets.map(async (target) => {
+      if (this.inventorySubscribers > 0 && !isInventoryTarget(target)) {
+        return;
+      }
       if (changes.some((change) => change.broad || change.rescan && (change.targetIds?.includes(target.id) || change.path === target.configFile))) {
         await this.discover(target);
         return;
@@ -752,19 +877,32 @@ export class DiscoveryService implements vscode.Disposable {
       cwd: target.cwd,
       configFile: target.configFile,
     });
-    if (
-      scopeFile
-      && result.exitCode !== 0
+    const noTests = result.exitCode !== 0
       && model.files.length === 0
-      && isBenignNoTestsFailure(stderr, model.errors)
-    ) {
-      // Ownership probing expects most candidate configs not to include the
-      // file. Cache that negative result instead of treating it as target
-      // failure and re-running it on every CodeLens refresh.
+      && isBenignNoTestsFailure(stderr, model.errors);
+    if (!scopeFile) {
+      // Failed discovery can still report the directories needed to detect a
+      // repaired custom test. Keep prior roots if the failed report is partial.
+      const roots = new Set([model.rootDir, ...model.testDirs ?? [], ...model.files.map((file) => path.dirname(file.file))]);
+      if (!noTests && (result.exitCode !== 0 || model.errors.length > 0)) {
+        for (const root of this.inventoryRoots.get(target.id) ?? []) {
+          roots.add(root);
+        }
+      }
+      this.inventoryRoots.set(target.id, [...roots]);
+      this.rebuildInventoryWatchers();
+    }
+    if (noTests) {
+      // Empty configs and file ownership misses are successful inventories.
       model.errors = [];
       this.projectMetadata.set(target.id, model.projects);
-      this.fileCache.set(key, model);
-      this.fileErrors.delete(key);
+      if (scopeFile) {
+        this.fileCache.set(key, model);
+        this.fileErrors.delete(key);
+      } else {
+        this.cache.set(target.id, model);
+        this.errors.delete(target.id);
+      }
       this.recordDiagnostics(target, startedAt, cliVersion, args, scopeFile, model.projects, undefined);
       this.emitter.fire({ target, model, scopeFile });
       return model;
@@ -917,6 +1055,15 @@ export class DiscoveryService implements vscode.Disposable {
         this.diagnostics.delete(key);
       }
     }
+    const target = this.targets.find((candidate) => candidate.id === targetId);
+    if (target) {
+      this.emitter.fire({ target, invalidated: true });
+    }
+    if (retire) {
+      this.pendingInventory.delete(targetId);
+    } else {
+      this.queueInventory(targetId);
+    }
   }
 
   private invalidateAllTargets(clearTargets: boolean): void {
@@ -956,6 +1103,14 @@ export class DiscoveryService implements vscode.Disposable {
       return;
     }
     this.disposed = true;
+    clearTimeout(this.inventoryTimer);
+    this.inventoryTimer = undefined;
+    this.pendingInventory.clear();
+    for (const watcher of this.inventoryWatchers.values()) {
+      watcher.dispose();
+    }
+    this.inventoryWatchers.clear();
+    this.inventoryRoots.clear();
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
@@ -975,6 +1130,7 @@ export class DiscoveryService implements vscode.Disposable {
     }
     this.output.dispose();
     this.emitter.dispose();
+    this.targetsEmitter.dispose();
   }
 
   private recordDiagnostics(

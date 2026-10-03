@@ -4,6 +4,7 @@
 out/**
 src/**
 scripts/**
+benchmarks/**
 fixtures/**
 .gitignore
 .depcheckrc

@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { substituteVariables } from './core/variables';
+import { hasPlaywrightTest } from './core/packageManager';
 import { RunTarget, resolveRunTarget } from './runTarget';
 import { Settings } from './settings';
 
@@ -62,4 +63,9 @@ export function isConfigFile(fsPath: string): boolean {
 
 export function isTestFile(fsPath: string): boolean {
   return /\.(test|spec)\.(js|jsx|ts|tsx|mts|cts|mjs|cjs)$/.test(fsPath);
+}
+
+/** Configured targets remain visible even when their installation is broken. */
+export function isInventoryTarget(target: RunTarget): boolean {
+  return Boolean(target.configFile || target.cli.source === 'explicit' || hasPlaywrightTest(target.cwd));
 }

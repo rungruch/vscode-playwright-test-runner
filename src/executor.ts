@@ -25,7 +25,7 @@ export interface RunningCommand {
 
 export interface SpawnOptions {
   cwd: string;
-  env: Record<string, string>;
+  env: Record<string, string | undefined>;
   onStdout?: (text: string) => void;
   onStderr?: (text: string) => void;
   cancellation?: CancellationTokenLike;

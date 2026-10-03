@@ -51,4 +51,18 @@ suite('Playwright 1.38 compatibility smoke', () => {
     assert.ok(titles.has('$(eye) Inspect Test'));
     assert.ok(titles.has('$(browser) Playwright UI'));
   });
+
+  test('automatically lists tests in Test Explorer on Playwright 1.38', async () => {
+    await api.explorer.initialize();
+    const workspace = api.explorer.getChildren()[0];
+    assert.strictEqual(workspace.kind, 'workspace');
+    const config = api.explorer.getChildren(workspace)[0];
+    const folder = api.explorer.getChildren(config).find((node) => node.kind === 'folder' && node.label === 'tests');
+    assert.ok(folder);
+    const file = api.explorer.getChildren(folder).find((node) => node.kind === 'file');
+    assert.ok(file);
+    const suite = api.explorer.getChildren(file)[0];
+    const nodes = suite.kind === 'suite' ? api.explorer.getChildren(suite) : [suite];
+    assert.deepStrictEqual(nodes.map((node) => node.label), ['adds numbers']);
+  });
 });

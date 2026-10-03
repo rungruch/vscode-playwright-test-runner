@@ -1,0 +1,4 @@
+# VS Code provides its API at runtime; vscode-test resolves test-electron dynamically.
+ignores:
+  - vscode
+  - '@vscode/test-electron'

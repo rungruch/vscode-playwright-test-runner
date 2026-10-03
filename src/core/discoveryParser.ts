@@ -39,11 +39,16 @@ export function parseDiscoveryOutput(
   }
 
   const projectNames = new Set<string>();
+  const testDirs = new Set<string>();
   for (const project of report.config?.projects ?? []) {
     if (project?.name) {
       projectNames.add(project.name);
     }
+    if (typeof project?.testDir === 'string' && project.testDir.length > 0) {
+      testDirs.add(path.resolve(config.cwd, project.testDir));
+    }
   }
+  config.testDirs = [...testDirs].sort();
 
   const files = new Map<string, DiscoveredFile>();
 

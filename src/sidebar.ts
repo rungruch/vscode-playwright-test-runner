@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { stripVTControlCharacters } from 'node:util';
 import { ArtifactService } from './artifactService';
 import { CompanionCliRunner } from './companionRunner';
 import { ArtifactRecord, CompanionFailure, CompanionRunSummary, CompanionTestItem } from './core/companionTypes';
@@ -7,7 +8,7 @@ import { InteractiveSession, InteractiveSessionManager } from './interactiveSess
 import { ReportSession, ReportSessionManager } from './reportSession';
 import { RunTarget } from './runTarget';
 
-type RunElement =
+export type RunElement =
   | { type: 'run'; run: CompanionRunSummary; isLatest?: boolean }
   | { type: 'historyGroup'; runs: readonly CompanionRunSummary[] }
   | { type: 'testCase'; test: CompanionTestItem; runId: string; targetId: string }
@@ -23,6 +24,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[];
   private runIds = '';
   private readonly runElements = new Map<string, Extract<RunElement, { type: 'run' }>>();
+  readonly onDidChangeRuns = this.runEmitter.event;
 
   constructor(
     context: vscode.ExtensionContext,
@@ -34,11 +36,6 @@ export class PlaywrightSidebar implements vscode.Disposable {
     this.disposables = [
       this.runEmitter,
       this.artifactEmitter,
-      vscode.window.registerTreeDataProvider('playwrightCodeLensRunner.runsView', {
-        onDidChangeTreeData: this.runEmitter.event,
-        getTreeItem: (element) => this.runTreeItem(element),
-        getChildren: (element) => this.runChildren(element),
-      }),
       vscode.window.registerTreeDataProvider('playwrightCodeLensRunner.artifactsView', {
         onDidChangeTreeData: this.artifactEmitter.event,
         getTreeItem: (element) => this.artifactTreeItem(element),
@@ -86,7 +83,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
     }
   }
 
-  private runChildren(element?: RunElement): RunElement[] {
+  runChildren(element?: RunElement): RunElement[] {
     if (!element) {
       const runs = this.runner.runs;
       const report = this.reportSession.currentSession;
@@ -217,7 +214,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
     return element;
   }
 
-  private runTreeItem(element: RunElement): vscode.TreeItem {
+  runTreeItem(element: RunElement): vscode.TreeItem {
     if (element.type === 'historyGroup') {
       const item = new vscode.TreeItem(`Previous Runs (${element.runs.length})`, vscode.TreeItemCollapsibleState.Collapsed);
       item.iconPath = new vscode.ThemeIcon('history');
@@ -368,7 +365,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
         (test.durationMs ? `- **Duration**: ${formatDuration(test.durationMs)}\n` : '') +
         (test.project ? `- **Project**: ${test.project}\n` : '') +
         (test.file ? `- **Location**: \`${path.basename(test.file)}:${test.line ?? 1}\`\n` : '') +
-        (test.message ? `\n\`\`\`\n${test.message}\n\`\`\`` : ''),
+        (test.message ? `\n\`\`\`\n${stripVTControlCharacters(test.message)}\n\`\`\`` : ''),
       );
       item.contextValue = 'playwrightCompanionTestCase';
       return item;
@@ -380,7 +377,7 @@ export class PlaywrightSidebar implements vscode.Disposable {
       item.tooltip = new vscode.MarkdownString(
         `**Failure**: ${failure.title}\n\n` +
         (failure.file ? `**Location**: \`${failure.file}:${failure.line ?? 1}\`\n\n` : '') +
-        (failure.message ? `\`\`\`\n${failure.message}\n\`\`\`` : ''),
+        (failure.message ? `\`\`\`\n${stripVTControlCharacters(failure.message)}\n\`\`\`` : ''),
       );
       item.command = failure.file ? {
         command: 'playwrightCodeLensRunner.openFailure',

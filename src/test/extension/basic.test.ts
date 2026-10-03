@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import './runtime.test';
+import './explorer.test';
 import * as vscode from 'vscode';
 import { EditorTestSelection } from '../../core/editorSelections';
 import { Settings } from '../../settings';
